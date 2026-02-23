@@ -1,0 +1,998 @@
+'use client'
+import { useEffect, useState } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { supabase } from '@/app/lib/supabase'
+import Link from 'next/link'
+import dynamic from 'next/dynamic'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
+
+// Load map dynamically
+const EventMap = dynamic(() => import('../../components/EventMap'), {
+    ssr: false,
+    loading: () => <div className="h-64 bg-gray-200 animate-pulse rounded flex items-center justify-center text-black font-bold">Loading Map...</div>
+})
+
+export default function QuotationPage() {
+    const { id } = useParams()
+    const router = useRouter()
+    const searchParams = useSearchParams()
+    const [event, setEvent] = useState<any>(null)
+    const [selections, setSelections] = useState<any[]>([])
+    const [loading, setLoading] = useState(true)
+    const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'quote')
+
+    // --- EDITING STATE ---
+    const [saving, setSaving] = useState(false)
+
+    // Schedule
+    const [startDate, setStartDate] = useState('')
+    const [endDate, setEndDate] = useState('')
+    const [days, setDays] = useState(0)
+
+    // Details
+    const [eventType, setEventType] = useState<'B2B' | 'B2C'>('B2C')
+    const [eventSize, setEventSize] = useState<'Small' | 'Large'>('Small')
+
+    // Venue
+    const [venueName, setVenueName] = useState('')
+    const [fullAddress, setFullAddress] = useState('')
+    const [city, setCity] = useState('')
+    const [state, setState] = useState('')
+    const [googleMapsLink, setGoogleMapsLink] = useState('')
+
+    // POC
+    const [pocName, setPocName] = useState('')
+    const [pocMobile, setPocMobile] = useState('')
+    const [pocEmail, setPocEmail] = useState('')
+
+    // Client
+    const [clientId, setClientId] = useState('')
+    const [clientName, setClientName] = useState('')
+    const [clientGst, setClientGst] = useState('')
+    const [clientContact, setClientContact] = useState('')
+    const [clientMobile, setClientMobile] = useState('')
+    const [clientEmail, setClientEmail] = useState('')
+
+    // Helper for Currency
+    const fmt = (n: number) => n.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
+
+    // Map for Item -> Station Name
+    const [itemStationMap, setItemStationMap] = useState<Record<string, string>>({})
+
+    useEffect(() => {
+        if (!id) {
+            console.error("ID is missing from useParams!")
+            return
+        }
+        console.log("Fetching data for ID:", id)
+        fetchData()
+    }, [id])
+
+    // Date Calc
+    useEffect(() => {
+        if (startDate && endDate) {
+            const s = new Date(startDate); const e = new Date(endDate)
+            const diff = Math.ceil((e.getTime() - s.getTime()) / (1000 * 3600 * 24)) + 1
+            setDays(diff > 0 ? diff : 0)
+        }
+    }, [startDate, endDate])
+
+    async function fetchData() {
+        console.log("fetchData started...")
+        try {
+            // 1. Fetch Event
+            const { data: eventData, error: eventError } = await supabase.from('events').select(`*, clients(*)`).eq('id', id).single()
+
+            if (eventError) {
+                console.error("Error fetching event:", eventError)
+                alert("Error loading event: " + eventError.message)
+                setLoading(false)
+                return
+            }
+
+            if (eventData) {
+                console.log("Event Data loaded:", eventData)
+                setEvent(eventData)
+
+                // Populate State
+                setStartDate(eventData.event_date || '')
+                setEndDate(eventData.end_date || eventData.event_date || '')
+                setEventType(eventData.event_type || 'B2C')
+                setEventSize(eventData.event_size || 'Small')
+
+                setVenueName(eventData.venue_name || '')
+                setFullAddress(eventData.venue_address || '')
+                setCity(eventData.city || '')
+                setState(eventData.state || '')
+                setGoogleMapsLink(eventData.google_maps_link || '')
+
+                setPocName(eventData.poc_name || '')
+                setPocMobile(eventData.poc_mobile || '')
+                setPocEmail(eventData.poc_email || '')
+
+                // Populate Client State
+                if (eventData.clients) {
+                    setClientId(eventData.clients.id)
+                    setClientName(eventData.clients.entity_name || '')
+                    setClientGst(eventData.clients.gst_number || '')
+                    setClientContact(eventData.clients.contact_person || '')
+                    setClientMobile(eventData.clients.mobile || '')
+                    setClientEmail(eventData.clients.email || '')
+                }
+            }
+
+            // 2. Fetch Menu Selections (Ordered by Title/Day)
+            const { data: menuData } = await supabase.from('menu_selections').select('*').eq('event_id', id).order('category_title', { ascending: true })
+            if (menuData) {
+                // Parse the JSON items back to array
+                const parsed = menuData.map((m: any) => ({
+                    ...m,
+                    selected_items: typeof m.selected_items === 'string' ? JSON.parse(m.selected_items) : m.selected_items
+                }))
+
+                // Custom Sort: By Day, then chronological meal time, then alphabetical
+                const mealOrder = ['breakfast', 'brunch', 'lunch', 'high-tea', 'high tea', 'snacks', 'dinner', 'supper', 'midnight']
+                const getMealIndex = (title: string) => {
+                    const lower = title.toLowerCase()
+                    const index = mealOrder.findIndex(meal => lower.includes(meal))
+                    return index === -1 ? 999 : index
+                }
+
+                parsed.sort((a: any, b: any) => {
+                    // 1. Manual User Order Index (if set)
+                    if (a.order_index || b.order_index) {
+                        return (a.order_index || 0) - (b.order_index || 0)
+                    }
+
+                    // 2. Default Chronological Order
+                    const dayMatchA = a.category_title.match(/Day (\d+)/i)
+                    const dayMatchB = b.category_title.match(/Day (\d+)/i)
+                    if (dayMatchA && dayMatchB) {
+                        const dayA = parseInt(dayMatchA[1])
+                        const dayB = parseInt(dayMatchB[1])
+                        if (dayA !== dayB) return dayA - dayB
+                    }
+                    const indexA = getMealIndex(a.category_title)
+                    const indexB = getMealIndex(b.category_title)
+                    if (indexA !== indexB) return indexA - indexB
+                    return a.category_title.localeCompare(b.category_title)
+                })
+
+                setSelections(parsed)
+            }
+
+            // 3. Fetch Stations and Items for Grouping
+            const { data: stationsData } = await supabase.from('menu_stations').select('id, name')
+            const { data: itemsData } = await supabase.from('menu_items').select('name, station_id')
+            if (stationsData && itemsData) {
+                const map: Record<string, string> = {}
+                itemsData.forEach((item: any) => {
+                    const st = stationsData.find((s: any) => s.id === item.station_id)
+                    map[item.name] = st ? st.name : 'OTHER'
+                })
+                setItemStationMap(map)
+            }
+
+            setLoading(false)
+        } catch (error) {
+            console.error("Critical error in fetchData:", error)
+            alert("Unexpected error loading quotation.")
+            setLoading(false)
+        }
+    }
+
+    // MANUAL CATEGORY ALIGNMENT (Move Up or Down)
+    const handleMoveCategory = async (index: number, direction: 'up' | 'down') => {
+        if (direction === 'up' && index === 0) return
+        if (direction === 'down' && index === selections.length - 1) return
+
+        const newSelections = [...selections]
+        const targetIndex = direction === 'up' ? index - 1 : index + 1
+
+        // Swap array items
+        const temp = newSelections[index]
+        newSelections[index] = newSelections[targetIndex]
+        newSelections[targetIndex] = temp
+
+        // Re-assign exact array 1-based order_index for all items to guarantee persistence
+        const sequencedSelections = newSelections.map((item, idx) => ({
+            ...item,
+            order_index: idx + 1
+        }))
+
+        setSelections(sequencedSelections)
+
+        // Sync to Supabase in background
+        try {
+            for (const item of sequencedSelections) {
+                await supabase.from('menu_selections')
+                    .update({ order_index: item.order_index })
+                    .eq('id', item.id)
+            }
+        } catch (e) {
+            console.error("Failed to sync category order to database:", e)
+        }
+    }
+
+    // UPDATE PAX OR PRICE
+    const handleUpdateLineItem = async (selectionId: string, field: 'pax' | 'price_per_plate', value: string) => {
+        let num = parseFloat(value) || 0
+        if (num < 0) num = 0 // Enforce non-negative values
+        setSelections(prev => prev.map(s => s.id === selectionId ? { ...s, [field]: num } : s))
+        await supabase.from('menu_selections').update({ [field]: num }).eq('id', selectionId)
+    }
+
+    // REMOVE AN ITEM FROM THE MENU LIST
+    const handleRemoveItem = async (selectionId: string, itemToRemove: string) => {
+        const selection = selections.find(s => s.id === selectionId)
+        if (!selection) return
+        const newItems = selection.selected_items.filter((i: string) => i !== itemToRemove)
+        setSelections(prev => prev.map(s => s.id === selectionId ? { ...s, selected_items: newItems } : s))
+        await supabase.from('menu_selections').update({ selected_items: JSON.stringify(newItems) }).eq('id', selectionId)
+    }
+
+    // SAVE EVENT SETTINGS
+    const handleSaveSettings = async () => {
+        setSaving(true)
+
+        // 1. Update Event
+        const { error: eventError } = await supabase.from('events').update({
+            event_date: startDate,
+            end_date: endDate,
+            event_type: eventType,
+            event_size: eventSize,
+            venue_name: venueName,
+            venue_address: fullAddress,
+            city,
+            state,
+            google_maps_link: googleMapsLink,
+            poc_name: pocName,
+            poc_mobile: pocMobile,
+            poc_email: pocEmail
+        }).eq('id', id)
+
+        if (eventError) {
+            alert("Error saving event: " + eventError.message)
+            setSaving(false)
+            return
+        }
+
+        // 2. Update Client (if changed)
+        if (clientId) {
+            const { error: clientError } = await supabase.from('clients').update({
+                entity_name: clientName,
+                gst_number: clientGst,
+                contact_person: clientContact,
+                mobile: clientMobile,
+                email: clientEmail
+            }).eq('id', clientId)
+
+            if (clientError) {
+                alert("Error saving client details: " + clientError.message)
+                setSaving(false)
+                return
+            }
+        }
+
+        setSaving(false)
+        alert("Event & Client details updated successfully!")
+        fetchData() // Refresh
+    }
+
+    // MAP HANDLER
+    const handleMapSelect = (loc: any) => {
+        setFullAddress(loc.display_name)
+        setCity(loc.address.city || loc.address.town || loc.address.village || loc.address.county || '')
+        setState(loc.address.state || loc.address.region || '')
+        if (loc.address.amenity || loc.address.building) {
+            setVenueName(loc.address.amenity || loc.address.building)
+        }
+        setGoogleMapsLink(`https://www.google.com/maps?q=${loc.lat},${loc.lon}`)
+    }
+
+    // CALCULATE TOTALS
+    const grandTotal = selections.reduce((sum, item) => sum + (item.pax * item.price_per_plate), 0)
+    const gst = grandTotal * 0.18
+    const finalAmount = grandTotal + gst
+
+    // PRINT PDF (Replaced with native jsPDF implementation)
+    const handleDownloadPDF = async () => {
+        const doc = new jsPDF()
+        let yPos = 20
+
+        // 1. Logo Fetching
+        try {
+            const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+            const response = await fetch(`${currentOrigin}/logo.png`)
+            if (response.ok) {
+                const blob = await response.blob()
+                const base64Logo = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.onloadend = () => resolve(reader.result as string)
+                    reader.onerror = reject
+                    reader.readAsDataURL(blob)
+                })
+
+                // Add Logo: Scale with bounding box to maintain exact ratio matching "w-56 object-contain"
+                const reqWidth = 60
+                const imgProps = doc.getImageProperties(base64Logo)
+                const ratio = imgProps.height / imgProps.width
+                const reqHeight = reqWidth * ratio
+
+                const pageWidth = doc.internal.pageSize.getWidth()
+                doc.addImage(base64Logo, 'PNG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
+                yPos += reqHeight + 15
+            }
+        } catch (error) {
+            console.error("Failed to load logo for PDF", error)
+        }
+
+        // 2. Header Information
+        const curDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+        const eventDateStr = new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+        const endDateStr = new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'normal')
+        doc.text('To,', 14, yPos)
+
+        doc.setFont('helvetica', 'bold')
+        doc.text(webClientDisplayName, 22, yPos + 6)
+
+        doc.setFont('helvetica', 'normal')
+        doc.text(`Date: ${curDate}`, doc.internal.pageSize.getWidth() - 14, yPos, { align: 'right' })
+
+        yPos += 15
+        doc.setFontSize(10)
+        doc.setFont('helvetica', 'bold')
+        doc.text(`Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}`, 14, yPos)
+        yPos += 10
+
+        // 3. Render Tables natively using autoTable
+        selections.forEach((sel) => {
+            const groupedItems: Record<string, string[]> = {}
+            sel.selected_items.forEach((item: string) => {
+                const station = itemStationMap[item] || 'OTHER'
+                if (!groupedItems[station]) groupedItems[station] = []
+                groupedItems[station].push(item)
+            })
+
+            let contentBody: any[] = []
+
+            Object.entries(groupedItems).forEach(([station, items]) => {
+                if (station !== 'OTHER') {
+                    contentBody.push([{ content: station.toUpperCase(), styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 4, right: 4 }, fontSize: 10, halign: 'left' } }])
+                }
+                const itemsStr = items.join('\n')
+                contentBody.push([{ content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10 } }])
+            })
+
+            // Apply right column with rowSpan to identically match the React UI
+            if (contentBody.length > 0) {
+                contentBody[0].push({
+                    content: `Rs. ${sel.price_per_plate} /-`,
+                    rowSpan: contentBody.length,
+                    styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11 }
+                })
+            } else {
+                contentBody.push([
+                    { content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: 4 } },
+                    { content: `Rs. ${sel.price_per_plate} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11 } }
+                ])
+            }
+
+            if (yPos > doc.internal.pageSize.getHeight() - 40) {
+                doc.addPage();
+                yPos = 20;
+            }
+
+            autoTable(doc, {
+                startY: yPos + 2,
+                head: [[{ content: `${sel.category_title} ( ${sel.pax} PAX )`, colSpan: 2 }]],
+                body: contentBody,
+                theme: 'grid',
+                styles: {
+                    font: 'helvetica',
+                    fontSize: 10,
+                    textColor: [0, 0, 0],
+                    lineColor: [0, 0, 0],
+                    lineWidth: 0.1,
+                },
+                headStyles: {
+                    fillColor: [249, 249, 249],
+                    textColor: [0, 0, 0],
+                    fontStyle: 'bold',
+                    halign: 'center',
+                    valign: 'middle',
+                    cellPadding: 3
+                },
+                bodyStyles: {
+                    halign: 'left',
+                    valign: 'top',
+                },
+                columnStyles: {
+                    0: { cellWidth: 135 },
+                    1: { cellWidth: 45 }
+                },
+                margin: { left: 14, right: 14 },
+                didDrawPage: (data) => {
+                    yPos = data.cursor ? data.cursor.y : yPos
+                }
+            })
+
+            yPos += 5
+        })
+
+        // 4. Notes Section
+        if (yPos > doc.internal.pageSize.getHeight() - 60) {
+            doc.addPage()
+            yPos = 20
+        }
+        yPos += 5
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'bold')
+        doc.text('NOTE:', 14, yPos)
+        yPos += 6
+
+        doc.setFontSize(10)
+        doc.setFont('helvetica', 'normal')
+        const notes = [
+            "1. Extra 18% GST is Applicable",
+            "2. 50% Advance Payment on Order Confirmation.",
+            "3. Transportation charges extra as per actual",
+            "4. Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.",
+            "5. Tables & Chafing dish should be arranged by client",
+            "6. Extra Pax will be charged as per above pricing"
+        ]
+        notes.forEach(note => {
+            doc.text(note, 20, yPos)
+            yPos += 5
+        })
+
+        if (yPos > doc.internal.pageSize.getHeight() - 40) {
+            doc.addPage()
+            yPos = 20
+        }
+
+        // 5. Bank Details Section
+        yPos += 5
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'bold')
+        doc.text('Bank Details:', 14, yPos)
+
+        autoTable(doc, {
+            startY: yPos + 3,
+            body: [
+                ["A/c Holder's Name", "THE RAMESHWARAM CAFE"],
+                ["Bank Name", "HDFC BANK LTD"],
+                ["A/c No", "50200012345678"],
+                ["IFS Code", "HDFC0000123"],
+                ["Branch", "VASANT VIHAR"]
+            ],
+            theme: 'grid',
+            styles: {
+                font: 'helvetica',
+                fontSize: 10,
+                textColor: [0, 0, 0],
+                lineColor: [0, 0, 0],
+                lineWidth: 0.1,
+            },
+            columnStyles: {
+                0: { cellWidth: 40, halign: 'left' },
+                1: { cellWidth: 50, halign: 'left', fontStyle: 'bold' } // Uppercase already applied in strings
+            },
+            margin: { left: 14 },
+            didDrawPage: (data) => {
+                yPos = data.cursor ? data.cursor.y : yPos
+            }
+        })
+
+        doc.save(`Quotation_${event.event_code}.pdf`)
+    }
+
+    // DOWNLOAD WORD DOC (Updated to match new Layout)
+    const handleDownloadMenuSheet = async () => {
+        let base64Logo = ''
+        try {
+            const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+            const response = await fetch(`${currentOrigin}/logo.png`)
+            if (response.ok) {
+                const blob = await response.blob()
+                base64Logo = await new Promise<string>((resolve, reject) => {
+                    const img = new Image()
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas')
+                        const MAX_WIDTH = 400
+                        let width = img.width
+                        let height = img.height
+
+                        if (width > MAX_WIDTH) {
+                            height = Math.round((height * MAX_WIDTH) / width)
+                            width = MAX_WIDTH
+                        }
+
+                        canvas.width = width
+                        canvas.height = height
+                        const ctx = canvas.getContext('2d')
+                        if (ctx) {
+                            ctx.drawImage(img, 0, 0, width, height)
+                            resolve(canvas.toDataURL('image/png'))
+                        } else {
+                            resolve('')
+                        }
+                    }
+                    img.onerror = reject
+                    img.src = URL.createObjectURL(blob)
+                })
+            }
+        } catch (error) {
+            console.error("Failed to load logo for Word export", error)
+        }
+
+        const header = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head><meta charset='utf-8'><title>Quotation</title>
+      <style>
+        body { font-family: 'Arial', sans-serif; font-size: 11pt; color: #000; line-height: 1.4; }
+        .text-center { text-align: center; }
+        .mb-20 { margin-bottom: 20px; }
+        .mb-10 { margin-bottom: 10px; }
+        .uppercase { text-transform: uppercase; }
+        .font-bold { font-weight: bold; }
+        .text-amber { color: #b45309; }
+        .text-red { color: #dc2626; }
+        table.layout-table { width: 100%; border: none; margin-bottom: 20px; }
+        table.layout-table td { border: none; padding: 0; vertical-align: top; }
+        table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #000; }
+        table.data-table th, table.data-table td { border: 1px solid #000; padding: 8px; vertical-align: top; }
+        table.bank-table { width: 350px; border-collapse: collapse; font-size: 10pt; text-align: center; }
+        table.bank-table td { border: 1px solid #000; padding: 4px; }
+        .pax-text { font-size: 9pt; font-weight: normal; color: #000; }
+      </style>
+      </head><body>
+    `
+
+        const maxPax = selections.length > 0 ? Math.max(...selections.map(s => s.pax)) : 0
+        const formattedDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+        const eventDateStr = new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+        const endDateStr = new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+        const menuDateStr = new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+
+        let clientDisplayName = 'Client Name'
+        if (event.clients) {
+            if (event.clients.contact_person && event.clients.entity_name) {
+                clientDisplayName = `${event.clients.contact_person} (${event.clients.entity_name})`
+            } else {
+                clientDisplayName = event.clients.contact_person || event.clients.entity_name || 'Client Name'
+            }
+        }
+
+        const logoHtml = base64Logo ? `<img src="${base64Logo}" alt="The Rameshwaram Cafe Logo" style="width: 250px; margin-bottom: 10px;" />` : ''
+
+        const eventDetails = `
+      <div class="text-center mb-20" style="margin-top: 20px;">
+        ${logoHtml}
+      </div>
+      <table class="layout-table" style="margin-top: 40px; margin-bottom: 30px;">
+        <tr>
+          <td style="text-align: left; width: 60%;">
+            <p style="margin: 0; color: #000; font-size: 11pt;">To,</p>
+            <p style="margin: 0 0 0 20px; font-weight: bold; color: #000; font-size: 11pt;">${clientDisplayName}</p>
+          </td>
+          <td style="text-align: right; width: 40%;">
+            <p style="margin: 0; color: #000; font-size: 11pt;">Date: ${formattedDate}</p>
+          </td>
+        </tr>
+      </table>
+      <p class="mb-10 font-bold" style="margin-top: 20px; font-size: 10pt; color: #000;">Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}</p>
+    `
+
+        let tablesString = ''
+        selections.forEach((sel) => {
+            const groupedItems: Record<string, string[]> = {}
+            sel.selected_items.forEach((item: string) => {
+                const station = itemStationMap[item] || 'OTHER'
+                if (!groupedItems[station]) groupedItems[station] = []
+                groupedItems[station].push(item)
+            })
+
+            let contentStr = ''
+            Object.entries(groupedItems).forEach(([station, items]) => {
+                if (station !== 'OTHER') {
+                    contentStr += `<h4 class="uppercase text-amber" style="margin: 10px 0 2px 0; font-size: 11pt; font-weight: bold;">${station}</h4>`
+                }
+                contentStr += `<p style="margin: 0; line-height: 1.4; font-size: 11pt; color: #000;">${items.join('<br/>')}</p>`
+            })
+
+            tablesString += `
+            <table class="data-table" style="margin-top: 20px;">
+              <tr>
+                <td colspan="2" class="text-center font-bold" style="background-color: #f9f9f9; padding: 8px; font-size: 11pt; color: #000;">
+                  ${sel.category_title} ( ${sel.pax} PAX )
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; width: 75%; vertical-align: top;">
+                  ${contentStr}
+                </td>
+                <td class="text-center font-bold" style="vertical-align: top; font-size: 11pt; color: #000; width: 25%; padding-top: 20px;">
+                  Rs. ${sel.price_per_plate} /-
+                </td>
+              </tr>
+            </table>
+            `
+        })
+
+        const table = tablesString
+
+        const footer = `</body></html>`
+
+        const notesHtml = `
+            <div style="margin-top: 40px; margin-bottom: 30px;">
+                <p style="margin-bottom: 10px; font-weight: bold; font-size: 11pt; color: #000;">NOTE:</p>
+                <ol style="margin-top: 0; padding-left: 20px; font-size: 11pt; color: #000; line-height: 1.5;">
+                    <li>Extra 18% GST is Applicable</li>
+                    <li>50% Advance Payment on Order Confirmation.</li>
+                    <li>Transportation charges extra as per actual</li>
+                    <li>Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.</li>
+                    <li>Tables & Chafing dish should be arranged by client</li>
+                    <li>Extra Pax will be charged as per above pricing</li>
+                </ol>
+            </div>
+        `
+
+        const bankDetailsHtml = `
+            <div style="margin-top: 20px;">
+                <p style="margin-bottom: 10px; font-weight: bold; font-size: 11pt; color: #000;">Bank Details:</p>
+                <table style="border-collapse: collapse; width: 400px; font-size: 10pt; color: #000; text-align: left;">
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">A/c Holder's Name</td>
+                        <td style="border: 1px solid #000; padding: 5px 10px; text-transform: uppercase;">THE RAMESHWARAM CAFE</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">Bank Name</td>
+                        <td style="border: 1px solid #000; padding: 5px 10px; text-transform: uppercase;">HDFC BANK LTD</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">A/c No</td>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">50200012345678</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">IFS Code</td>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">HDFC0000123</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 5px 10px;">Branch</td>
+                        <td style="border: 1px solid #000; padding: 5px 10px; text-transform: uppercase;">Vasant Vihar</td>
+                    </tr>
+                </table>
+            </div>
+        `
+
+        const sourceHTML = header + eventDetails + table + notesHtml + bankDetailsHtml + footer
+
+        // Reverted to simple HTML export as Google Docs does not support MHTML / Multipart MIME
+        const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML)
+
+        const fileDownload = document.createElement("a")
+        document.body.appendChild(fileDownload)
+        fileDownload.href = source
+        fileDownload.download = `Quotation_${event.event_code}.doc`
+        fileDownload.click()
+        document.body.removeChild(fileDownload)
+    }
+
+    if (loading) return <div className="min-h-screen flex items-center justify-center font-bold text-stone-400">Loading Quote...</div>
+    if (!event) return <div>Event not found</div>
+
+    const inputClass = "w-full border border-gray-300 bg-white p-2 rounded text-sm font-bold text-black outline-none focus:border-black focus:ring-1 focus:ring-black placeholder-gray-400 transition-all"
+    const labelClass = "block text-[10px] font-black text-gray-500 uppercase mb-1 tracking-widest"
+
+    let webClientDisplayName = 'Client Name'
+    if (event && event.clients) {
+        if (event.clients.contact_person && event.clients.entity_name) {
+            webClientDisplayName = `${event.clients.contact_person} (${event.clients.entity_name})`
+        } else {
+            webClientDisplayName = event.clients.contact_person || event.clients.entity_name || 'Client Name'
+        }
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-100 font-sans text-black pb-20 print:bg-white print:pb-0">
+
+            {/* NAVBAR (Hidden in Print) */}
+            <div className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm">
+                <div className="flex items-center gap-4">
+                    <Link href="/" className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200 transition">←</Link>
+                    <div>
+                        <h1 className="text-xl font-black">{event.event_code}</h1>
+                        <p className="text-xs font-bold text-gray-500 uppercase">{event.clients?.entity_name}</p>
+                    </div>
+                </div>
+                <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                    {['quote', 'settings'].map((tab) => (
+                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${activeTab === tab ? 'bg-white shadow-sm text-black' : 'text-gray-400 hover:text-gray-600'}`}>{tab}</button>
+                    ))}
+                </div>
+                <div className="flex gap-3">
+                    <button onClick={handleDownloadMenuSheet} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-xs font-bold transition flex items-center gap-2">
+                        <span>📄</span> Word
+                    </button>
+                    <button onClick={handleDownloadPDF} className="bg-black text-white px-5 py-2 rounded text-xs font-bold shadow-lg hover:bg-gray-800 transition flex items-center gap-2">
+                        <span>🖨️</span> PDF
+                    </button>
+                </div>
+            </div>
+
+            <div className="max-w-[210mm] mx-auto my-8 print:my-0 print:max-w-full">
+
+                {/* === QUOTE TAB === */}
+                {activeTab === 'quote' && (
+                    <div className="bg-white shadow-lg print:shadow-none min-h-[297mm] flex flex-col relative text-black text-sm p-8 md:p-16 font-bold">
+
+                        {/* LOGO AREA */}
+                        <div className="text-center mb-8 flex flex-col items-center">
+                            {/* Logo */}
+                            <img
+                                src="/logo.png"
+                                alt="The Rameshwaram Cafe"
+                                className="w-56 object-contain mb-2"
+                                onError={(e) => { e.currentTarget.style.display = 'none' }}
+                            />
+                        </div>
+
+                        {/* TO & DATE */}
+                        <div className="flex justify-between items-start mb-6 text-sm">
+                            <div>
+                                <p>To,</p>
+                                <p className="ml-4 font-bold">{webClientDisplayName}</p>
+                            </div>
+                            <div>
+                                <p>Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')}</p>
+                            </div>
+                        </div>
+
+                        {/* EVENT DATES */}
+                        <div className="mb-4 text-sm font-bold">
+                            <p>Event Date : {new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')} {days > 1 ? 'to ' + new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : ''}</p>
+                        </div>
+
+                        {/* TABLES MAP */}
+                        {selections.map((sel, idx) => {
+                            const groupedItems: Record<string, string[]> = {}
+                            sel.selected_items.forEach((item: string) => {
+                                const station = itemStationMap[item] || 'OTHER'
+                                if (!groupedItems[station]) groupedItems[station] = []
+                                groupedItems[station].push(item)
+                            })
+
+                            return (
+                                <div key={sel.id} className="mb-8">
+                                    <table className="w-full border-collapse border border-black text-sm mt-5">
+                                        <tbody>
+                                            <tr>
+                                                <td colSpan={2} className="border-b border-black text-center font-bold bg-gray-50 p-2 relative">
+                                                    {/* Custom Alignment Arrows */}
+                                                    <div className="absolute left-2 top-1/2 -translate-y-1/2 print:hidden flex gap-2">
+                                                        <button
+                                                            onClick={() => handleMoveCategory(idx, 'up')}
+                                                            disabled={idx === 0}
+                                                            className="text-gray-400 hover:text-black disabled:opacity-30 disabled:hover:text-gray-400 text-xs"
+                                                            title="Move Up"
+                                                        >
+                                                            ▲
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleMoveCategory(idx, 'down')}
+                                                            disabled={idx === selections.length - 1}
+                                                            className="text-gray-400 hover:text-black disabled:opacity-30 disabled:hover:text-gray-400 text-xs"
+                                                            title="Move Down"
+                                                        >
+                                                            ▼
+                                                        </button>
+                                                    </div>
+
+                                                    {sel.category_title} (
+                                                    <span className="print:hidden mx-1">
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            value={sel.pax}
+                                                            onChange={(e) => handleUpdateLineItem(sel.id, 'pax', e.target.value)}
+                                                            className="w-16 mx-1 border border-gray-300 rounded text-center px-1 text-xs"
+                                                        />
+                                                    </span>
+                                                    <span className="hidden print:inline">{sel.pax}</span>
+                                                    PAX )
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td className="border-r border-black p-4 align-top w-3/4">
+                                                    {Object.entries(groupedItems).map(([station, items], sIdx) => (
+                                                        <div key={sIdx} className="mb-3 last:mb-0">
+                                                            {station !== 'OTHER' && (
+                                                                <h4 className="font-bold text-amber-700 text-sm uppercase tracking-wider mb-1">{station}</h4>
+                                                            )}
+                                                            <ul className="list-none leading-tight space-y-0.5">
+                                                                {items.map((item, i) => (
+                                                                    <li key={i}>{item}</li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    ))}
+                                                </td>
+                                                <td className="p-4 align-top text-center font-bold w-1/4 pt-6">
+                                                    <div className="flex flex-col items-center justify-start h-full">
+                                                        <div className="flex items-center">
+                                                            <span className="mr-1">Rs.</span>
+                                                            <input
+                                                                type="number"
+                                                                value={sel.price_per_plate}
+                                                                onChange={(e) => handleUpdateLineItem(sel.id, 'price_per_plate', e.target.value)}
+                                                                className="w-16 text-center bg-transparent border-b border-gray-300 focus:border-black outline-none print:hidden font-bold"
+                                                            />
+                                                            <span className="print:inline hidden">{sel.price_per_plate}</span>
+                                                            <span>/-</span>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )
+                        })}
+
+                        {/* PAGE BREAK MAYBE FOR PRINT */}
+                        <div className="print:break-inside-avoid text-sm mt-8">
+                            {/* NOTE */}
+                            <div className="mb-10">
+                                <p className="mb-2 uppercase font-bold">NOTE:</p>
+                                <ol className="list-decimal pl-8 space-y-1">
+                                    <li>Extra 18% GST is Applicable</li>
+                                    <li>50% Advance Payment on Order Confirmation.</li>
+                                    <li>Transportation charges extra as per actual</li>
+                                    <li>Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.</li>
+                                    <li>Tables & Chafing dish should be arranged by client</li>
+                                    <li>Extra Pax will be charged as per above pricing</li>
+                                </ol>
+                            </div>
+
+                            {/* BANK DETAILS */}
+                            <div>
+                                <p className="mb-2 font-bold">Bank Details:</p>
+                                <table className="border-collapse border border-black text-center text-sm w-96">
+                                    <tbody>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs whitespace-nowrap text-left">A/c Holder's Name</td>
+                                            <td className="border border-black p-1 px-4 uppercase text-xs">THE RAMESHWARAM CAFE</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">Bank Name</td>
+                                            <td className="border border-black p-1 px-4 uppercase text-xs">HDFC BANK LTD</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">A/c No</td>
+                                            <td className="border border-black p-1 px-4 text-xs">50200012345678</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">IFS Code</td>
+                                            <td className="border border-black p-1 px-4 text-xs">HDFC0000123</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">Branch</td>
+                                            <td className="border border-black p-1 px-4 uppercase text-xs">Vasant Vihar</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+                )}
+
+                {/* === SETTINGS TAB === */}
+                {activeTab === 'settings' && (
+                    <div className="bg-white p-8 rounded shadow-sm border border-gray-200">
+                        <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-4">
+                            <h3 className="font-black text-2xl text-black">Event Details</h3>
+                            <button
+                                onClick={handleSaveSettings}
+                                disabled={saving}
+                                className="bg-black text-white px-8 py-3 rounded text-sm font-bold uppercase tracking-wide hover:bg-gray-800 transition shadow-lg active:scale-95 disabled:opacity-50"
+                            >
+                                {saving ? 'Saving...' : 'Save Changes'}
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+
+                            {/* LEFT COL */}
+                            <div className="space-y-8">
+
+                                {/* NEW: CLIENT DETAILS */}
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Client Details</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="col-span-2">
+                                            <label className={labelClass}>Client Name</label>
+                                            <input className={inputClass} value={clientName} onChange={e => setClientName(e.target.value)} />
+                                        </div>
+                                        <div><label className={labelClass}>GST Number</label><input className={inputClass} value={clientGst} onChange={e => setClientGst(e.target.value)} /></div>
+                                        <div><label className={labelClass}>Contact Person</label><input className={inputClass} value={clientContact} onChange={e => setClientContact(e.target.value)} /></div>
+                                        <div><label className={labelClass}>Mobile</label><input className={inputClass} value={clientMobile} onChange={e => setClientMobile(e.target.value)} /></div>
+                                        <div><label className={labelClass}>Email</label><input className={inputClass} value={clientEmail} onChange={e => setClientEmail(e.target.value)} /></div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Schedule & Type</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div><label className={labelClass}>Start Date</label><input type="date" className={inputClass} value={startDate} onChange={e => { setStartDate(e.target.value); if (!endDate) setEndDate(e.target.value) }} /></div>
+                                        <div><label className={labelClass}>End Date</label><input type="date" className={inputClass} value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} /></div>
+                                    </div>
+                                    {days > 0 && <div className="bg-gray-100 p-2 rounded text-center text-xs font-bold text-black uppercase tracking-wide">{days} Day Event</div>}
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className={labelClass}>Event Type</label>
+                                            <select className={inputClass} value={eventType} onChange={e => setEventType(e.target.value as any)}>
+                                                <option value="B2B">B2B (Corporate)</option>
+                                                <option value="B2C">B2C (Private)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className={labelClass}>Size Category</label>
+                                            <select className={inputClass} value={eventSize} onChange={e => setEventSize(e.target.value as any)}>
+                                                <option value="Small">Small (Green)</option>
+                                                <option value="Large">Large (Red)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Point of Contact (Event Specific)</h4>
+                                    <div><label className={labelClass}>POC Name</label><input className={inputClass} value={pocName} onChange={e => setPocName(e.target.value)} /></div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div><label className={labelClass}>Mobile</label><input className={inputClass} value={pocMobile} onChange={e => setPocMobile(e.target.value)} /></div>
+                                        <div><label className={labelClass}>Email</label><input className={inputClass} value={pocEmail} onChange={e => setPocEmail(e.target.value)} /></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* RIGHT COL */}
+                            <div className="space-y-4">
+                                <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Venue Location</h4>
+
+                                <div>
+                                    <label className={labelClass}>Google Maps Link</label>
+                                    <input
+                                        className={`${inputClass} text - blue - 600 underline`}
+                                        value={googleMapsLink}
+                                        onChange={e => setGoogleMapsLink(e.target.value)}
+                                        placeholder="Paste maps link..."
+                                    />
+                                </div>
+
+                                <div className="h-64 border border-gray-200 rounded overflow-hidden">
+                                    <EventMap onLocationSelect={handleMapSelect} />
+                                </div>
+
+                                <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text - lg`} value={venueName} onChange={e => setVenueName(e.target.value)} /></div>
+                                <div><label className={labelClass}>Address</label><textarea className={`${inputClass} h - 20`} value={fullAddress} onChange={e => setFullAddress(e.target.value)} /></div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className={labelClass}>City</label><input className={inputClass} value={city} onChange={e => setCity(e.target.value)} /></div>
+                                    <div><label className={labelClass}>State</label><input className={inputClass} value={state} onChange={e => setState(e.target.value)} /></div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                )}
+
+            </div>
+        </div >
+    )
+}
