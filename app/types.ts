@@ -11,6 +11,12 @@ export type Client = {
   address?: string
 }
 
+export interface TermCondition {
+  id: string
+  text: string
+  selected: boolean
+}
+
 export type Event = {
   id: string
   event_code: string
@@ -26,6 +32,7 @@ export type Event = {
   event_type?: 'B2B' | 'B2C'
   event_size?: 'Small' | 'Large'
   google_maps_link?: string
+  terms_and_conditions?: TermCondition[]
 }
 
 export type MenuItem = {

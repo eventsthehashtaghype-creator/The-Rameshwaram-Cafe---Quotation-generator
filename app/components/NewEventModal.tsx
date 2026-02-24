@@ -152,9 +152,9 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
     // Clear previous errors
     setErrorMessage(null)
 
-    // Check all necessary fields
-    if (!clientName || !clientEmail || !clientContact || !clientMobile || !startDate || !endDate || !city || !state || !venueName || !fullAddress || !pocName || !pocMobile || !pocEmail) {
-      setErrorMessage("Please fill in all required fields (Client Name, Email, Contact, Start/End Date, Venue Details, and POC).")
+    // Check all necessary fields (Venue Name and Address removed from strict validation)
+    if (!clientName || !clientEmail || !clientContact || !clientMobile || !startDate || !endDate || !city || !state || !pocName || !pocMobile || !pocEmail) {
+      setErrorMessage("Please fill in all required fields (Client Name, Email, Contact, Start/End Date, City, State, and POC).")
       // Scroll to top of modal to see error
       document.querySelector('.max-h-\\[95vh\\]')?.scrollTo({ top: 0, behavior: 'smooth' })
       return
@@ -389,7 +389,12 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
 
                 {/* Google Maps Link - NOW FIRST */}
                 <div className="mb-6">
-                  <label className={labelClass}>Google Maps Link</label>
+                  <div className="flex justify-between items-end mb-1">
+                    <label className={`${labelClass} !mb-0`}>Google Maps Link</label>
+                    <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                      <span>🌍</span> Search on Google Maps
+                    </a>
+                  </div>
                   <div className="flex gap-2">
                     <input
                       className={`${inputClass} text-blue-600 underline`}

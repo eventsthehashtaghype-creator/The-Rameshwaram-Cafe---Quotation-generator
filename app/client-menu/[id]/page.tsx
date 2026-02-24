@@ -183,21 +183,45 @@ function ClientMenuContent() {
             if (response.ok) {
                 const blob = await response.blob()
                 const base64Logo = await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader()
-                    reader.onloadend = () => resolve(reader.result as string)
-                    reader.onerror = reject
-                    reader.readAsDataURL(blob)
+                    const img = new Image()
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas')
+                        const MAX_WIDTH = 400
+                        let width = img.width
+                        let height = img.height
+
+                        if (width > MAX_WIDTH) {
+                            height = Math.round((height * MAX_WIDTH) / width)
+                            width = MAX_WIDTH
+                        }
+
+                        canvas.width = width
+                        canvas.height = height
+                        const ctx = canvas.getContext('2d')
+                        if (ctx) {
+                            ctx.fillStyle = '#FFFFFF'
+                            ctx.fillRect(0, 0, width, height)
+                            ctx.drawImage(img, 0, 0, width, height)
+                            resolve(canvas.toDataURL('image/jpeg', 0.8)) // Compress to JPEG for smaller PDF size
+                        } else {
+                            resolve('')
+                        }
+                    }
+                    img.onerror = reject
+                    img.src = URL.createObjectURL(blob)
                 })
 
-                // Add Logo: Scale with bounding box to maintain exact ratio matching "w-56 object-contain"
-                const reqWidth = 60
-                const imgProps = doc.getImageProperties(base64Logo)
-                const ratio = imgProps.height / imgProps.width
-                const reqHeight = reqWidth * ratio
+                if (base64Logo) {
+                    // Add Logo: Scale with bounding box to maintain exact ratio matching "w-56 object-contain"
+                    const reqWidth = 60
+                    const imgProps = doc.getImageProperties(base64Logo)
+                    const ratio = imgProps.height / imgProps.width
+                    const reqHeight = reqWidth * ratio
 
-                const pageWidth = doc.internal.pageSize.getWidth()
-                doc.addImage(base64Logo, 'PNG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
-                yPos += reqHeight + 15
+                    const pageWidth = doc.internal.pageSize.getWidth()
+                    doc.addImage(base64Logo, 'JPEG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
+                    yPos += reqHeight + 15
+                }
             }
         } catch (error) {
             console.error("Failed to load logo for PDF", error)

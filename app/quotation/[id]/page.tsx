@@ -60,6 +60,17 @@ export default function QuotationPage() {
     // Map for Item -> Station Name
     const [itemStationMap, setItemStationMap] = useState<Record<string, string>>({})
 
+    // --- TERMS AND CONDITIONS STATE ---
+    const defaultTerms = [
+        { id: 't1', text: "Extra 18% GST is Applicable", selected: true },
+        { id: 't2', text: "50% Advance Payment on Order Confirmation.", selected: true },
+        { id: 't3', text: "Transportation charges extra as per actual", selected: true },
+        { id: 't4', text: "Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.", selected: true },
+        { id: 't5', text: "Tables & Chafing dish should be arranged by client", selected: true },
+        { id: 't6', text: "Extra Pax will be charged as per above pricing", selected: true }
+    ]
+    const [terms, setTerms] = useState<{ id: string, text: string, selected: boolean }[]>([])
+
     useEffect(() => {
         if (!id) {
             console.error("ID is missing from useParams!")
@@ -110,6 +121,13 @@ export default function QuotationPage() {
                 setPocName(eventData.poc_name || '')
                 setPocMobile(eventData.poc_mobile || '')
                 setPocEmail(eventData.poc_email || '')
+
+                // Init terms state gracefully from DB or Defaults
+                if (eventData.terms_and_conditions && Array.isArray(eventData.terms_and_conditions)) {
+                    setTerms(eventData.terms_and_conditions)
+                } else {
+                    setTerms(defaultTerms)
+                }
 
                 // Populate Client State
                 if (eventData.clients) {
@@ -249,7 +267,9 @@ export default function QuotationPage() {
             google_maps_link: googleMapsLink,
             poc_name: pocName,
             poc_mobile: pocMobile,
-            poc_email: pocEmail
+            poc_email: pocEmail,
+            terms_and_conditions: terms
+
         }).eq('id', id)
 
         if (eventError) {
@@ -308,21 +328,45 @@ export default function QuotationPage() {
             if (response.ok) {
                 const blob = await response.blob()
                 const base64Logo = await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader()
-                    reader.onloadend = () => resolve(reader.result as string)
-                    reader.onerror = reject
-                    reader.readAsDataURL(blob)
+                    const img = new Image()
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas')
+                        const MAX_WIDTH = 400
+                        let width = img.width
+                        let height = img.height
+
+                        if (width > MAX_WIDTH) {
+                            height = Math.round((height * MAX_WIDTH) / width)
+                            width = MAX_WIDTH
+                        }
+
+                        canvas.width = width
+                        canvas.height = height
+                        const ctx = canvas.getContext('2d')
+                        if (ctx) {
+                            ctx.fillStyle = '#FFFFFF'
+                            ctx.fillRect(0, 0, width, height)
+                            ctx.drawImage(img, 0, 0, width, height)
+                            resolve(canvas.toDataURL('image/jpeg', 0.8)) // Compress to JPEG for smaller PDF size
+                        } else {
+                            resolve('')
+                        }
+                    }
+                    img.onerror = reject
+                    img.src = URL.createObjectURL(blob)
                 })
 
-                // Add Logo: Scale with bounding box to maintain exact ratio matching "w-56 object-contain"
-                const reqWidth = 60
-                const imgProps = doc.getImageProperties(base64Logo)
-                const ratio = imgProps.height / imgProps.width
-                const reqHeight = reqWidth * ratio
+                if (base64Logo) {
+                    // Add Logo: Scale with bounding box to maintain exact ratio matching "w-56 object-contain"
+                    const reqWidth = 60
+                    const imgProps = doc.getImageProperties(base64Logo)
+                    const ratio = imgProps.height / imgProps.width
+                    const reqHeight = reqWidth * ratio
 
-                const pageWidth = doc.internal.pageSize.getWidth()
-                doc.addImage(base64Logo, 'PNG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
-                yPos += reqHeight + 15
+                    const pageWidth = doc.internal.pageSize.getWidth()
+                    doc.addImage(base64Logo, 'JPEG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
+                    yPos += reqHeight + 15
+                }
             }
         } catch (error) {
             console.error("Failed to load logo for PDF", error)
@@ -360,25 +404,38 @@ export default function QuotationPage() {
 
             let contentBody: any[] = []
 
-            Object.entries(groupedItems).forEach(([station, items]) => {
+            Object.entries(groupedItems).forEach(([station, items], index) => {
+                const topBorder = index === 0 ? 0 : 0.1;
+
                 if (station !== 'OTHER') {
-                    contentBody.push([{ content: station.toUpperCase(), styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 4, right: 4 }, fontSize: 10, halign: 'left' } }])
+                    contentBody.push([
+                        { content: station.toUpperCase(), styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 4, right: 4 }, fontSize: 10, halign: 'left', lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
+                    ])
+                    const itemsStr = items.join('\n')
+                    contentBody.push([
+                        { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: 0, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
+                    ])
+                } else {
+                    const itemsStr = items.join('\n')
+                    contentBody.push([
+                        { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 4, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
+                    ])
                 }
-                const itemsStr = items.join('\n')
-                contentBody.push([{ content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10 } }])
             })
 
-            // Apply right column with rowSpan to identically match the React UI
             if (contentBody.length > 0) {
+                const lastRowStyles = contentBody[contentBody.length - 1][0].styles;
+                lastRowStyles.lineWidth.bottom = 0.1;
+
                 contentBody[0].push({
                     content: `Rs. ${sel.price_per_plate} /-`,
                     rowSpan: contentBody.length,
-                    styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11 }
+                    styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] }
                 })
             } else {
                 contentBody.push([
-                    { content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: 4 } },
-                    { content: `Rs. ${sel.price_per_plate} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11 } }
+                    { content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: 4, lineWidth: { top: 0, right: 0, bottom: 0.1, left: 0 }, lineColor: [0, 0, 0] } },
+                    { content: `Rs. ${sel.price_per_plate} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] } }
                 ])
             }
 
@@ -391,13 +448,15 @@ export default function QuotationPage() {
                 startY: yPos + 2,
                 head: [[{ content: `${sel.category_title} ( ${sel.pax} PAX )`, colSpan: 2 }]],
                 body: contentBody,
-                theme: 'grid',
+                theme: 'plain',
+                tableLineColor: [0, 0, 0],
+                tableLineWidth: 0,
                 styles: {
                     font: 'helvetica',
                     fontSize: 10,
                     textColor: [0, 0, 0],
-                    lineColor: [0, 0, 0],
-                    lineWidth: 0.1,
+                    lineWidth: 0,
+                    lineColor: [0, 0, 0]
                 },
                 headStyles: {
                     fillColor: [249, 249, 249],
@@ -405,7 +464,9 @@ export default function QuotationPage() {
                     fontStyle: 'bold',
                     halign: 'center',
                     valign: 'middle',
-                    cellPadding: 3
+                    cellPadding: 3,
+                    lineWidth: 0.1,
+                    lineColor: [0, 0, 0]
                 },
                 bodyStyles: {
                     halign: 'left',
@@ -437,18 +498,17 @@ export default function QuotationPage() {
 
         doc.setFontSize(10)
         doc.setFont('helvetica', 'normal')
-        const notes = [
-            "1. Extra 18% GST is Applicable",
-            "2. 50% Advance Payment on Order Confirmation.",
-            "3. Transportation charges extra as per actual",
-            "4. Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.",
-            "5. Tables & Chafing dish should be arranged by client",
-            "6. Extra Pax will be charged as per above pricing"
-        ]
-        notes.forEach(note => {
-            doc.text(note, 20, yPos)
+
+        const activeTerms = terms.filter(t => t.selected)
+        if (activeTerms.length === 0) {
+            doc.text("No additional terms.", 20, yPos)
             yPos += 5
-        })
+        } else {
+            activeTerms.forEach((term, idx) => {
+                doc.text(`${idx + 1}. ${term.text}`, 20, yPos)
+                yPos += 5
+            })
+        }
 
         if (yPos > doc.internal.pageSize.getHeight() - 40) {
             doc.addPage()
@@ -628,17 +688,15 @@ export default function QuotationPage() {
 
         const footer = `</body></html>`
 
+        const activeTerms = terms.filter(t => t.selected)
         const notesHtml = `
             <div style="margin-top: 40px; margin-bottom: 30px;">
                 <p style="margin-bottom: 10px; font-weight: bold; font-size: 11pt; color: #000;">NOTE:</p>
+                ${activeTerms.length > 0 ? `
                 <ol style="margin-top: 0; padding-left: 20px; font-size: 11pt; color: #000; line-height: 1.5;">
-                    <li>Extra 18% GST is Applicable</li>
-                    <li>50% Advance Payment on Order Confirmation.</li>
-                    <li>Transportation charges extra as per actual</li>
-                    <li>Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.</li>
-                    <li>Tables & Chafing dish should be arranged by client</li>
-                    <li>Extra Pax will be charged as per above pricing</li>
+                    ${activeTerms.map(term => `<li>${term.text}</li>`).join('')}
                 </ol>
+                ` : '<p style="font-size: 11pt; color: #000;">No additional terms.</p>'}
             </div>
         `
 
@@ -847,16 +905,57 @@ export default function QuotationPage() {
                         {/* PAGE BREAK MAYBE FOR PRINT */}
                         <div className="print:break-inside-avoid text-sm mt-8">
                             {/* NOTE */}
-                            <div className="mb-10">
-                                <p className="mb-2 uppercase font-bold">NOTE:</p>
-                                <ol className="list-decimal pl-8 space-y-1">
-                                    <li>Extra 18% GST is Applicable</li>
-                                    <li>50% Advance Payment on Order Confirmation.</li>
-                                    <li>Transportation charges extra as per actual</li>
-                                    <li>Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.</li>
-                                    <li>Tables & Chafing dish should be arranged by client</li>
-                                    <li>Extra Pax will be charged as per above pricing</li>
-                                </ol>
+                            <div className="mb-10 group">
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="uppercase font-bold">NOTE:</p>
+                                    <button
+                                        onClick={() => setTerms([...terms, { id: `custom-${Date.now()}`, text: "New Condition", selected: true }])}
+                                        className="text-xs font-bold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1 rounded transition-colors print:hidden opacity-0 group-hover:opacity-100"
+                                    >
+                                        + Add Condition
+                                    </button>
+                                </div>
+                                <div className="space-y-2">
+                                    {terms.map((term, index) => (
+                                        <div key={term.id} className={`flex items-start gap-3 ${!term.selected && 'print:hidden'}`}>
+                                            <div className="pt-1 print:hidden">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={term.selected}
+                                                    onChange={(e) => {
+                                                        const newTerms = [...terms]
+                                                        newTerms[index].selected = e.target.checked
+                                                        setTerms(newTerms)
+                                                    }}
+                                                    className="w-4 h-4 text-black rounded border-gray-300 focus:ring-black cursor-pointer"
+                                                />
+                                            </div>
+                                            <div className="flex-1 flex items-start gap-2">
+                                                <span className={`font-medium ${!term.selected ? 'text-gray-400' : ''}`}>
+                                                    {index + 1}.
+                                                </span>
+                                                <input
+                                                    type="text"
+                                                    value={term.text}
+                                                    onChange={(e) => {
+                                                        const newTerms = [...terms]
+                                                        newTerms[index].text = e.target.value
+                                                        setTerms(newTerms)
+                                                    }}
+                                                    className={`w-full bg-transparent border-b border-transparent hover:border-gray-200 focus:border-black outline-none transition-colors ${!term.selected ? 'text-gray-400 line-through decoration-gray-300' : ''}`}
+                                                    placeholder="Enter term condition..."
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={() => setTerms(terms.filter(t => t.id !== term.id))}
+                                                className="text-gray-400 hover:text-red-500 font-bold px-2 print:hidden opacity-0 group-hover:opacity-100 transition-opacity"
+                                                title="Remove Condition"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
 
                             {/* BANK DETAILS */}
