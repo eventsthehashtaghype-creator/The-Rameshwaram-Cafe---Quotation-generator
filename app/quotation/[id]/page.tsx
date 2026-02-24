@@ -602,14 +602,14 @@ export default function QuotationPage() {
         // 2. Header Table (To Client / Date)
         docChildren.push(
             new Table({
-                width: { size: 100, type: WidthType.PERCENTAGE },
+                width: { size: 5000, type: WidthType.PERCENTAGE },
                 borders: noBorder,
                 rows: [
                     new TableRow({
                         children: [
                             new TableCell({
                                 borders: noBorder,
-                                width: { size: 60, type: WidthType.PERCENTAGE },
+                                width: { size: 3000, type: WidthType.PERCENTAGE },
                                 children: [
                                     new Paragraph({ children: [new TextRun("To,")] }),
                                     new Paragraph({ children: [new TextRun({ text: clientDisplayName, bold: true })] }),
@@ -617,7 +617,7 @@ export default function QuotationPage() {
                             }),
                             new TableCell({
                                 borders: noBorder,
-                                width: { size: 40, type: WidthType.PERCENTAGE },
+                                width: { size: 2000, type: WidthType.PERCENTAGE },
                                 children: [
                                     new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun(`Date: ${formattedDate}`)] }),
                                 ]
@@ -660,7 +660,7 @@ export default function QuotationPage() {
             docChildren.push(
                 new Paragraph({ spacing: { before: 200 } }),
                 new Table({
-                    width: { size: 100, type: WidthType.PERCENTAGE },
+                    width: { size: 5000, type: WidthType.PERCENTAGE },
                     layout: TableLayoutType.FIXED,
                     rows: [
                         // Category Header
@@ -677,12 +677,12 @@ export default function QuotationPage() {
                         new TableRow({
                             children: [
                                 new TableCell({
-                                    width: { size: 75, type: WidthType.PERCENTAGE },
+                                    width: { size: 3750, type: WidthType.PERCENTAGE },
                                     margins: { left: 100, right: 100, top: 100, bottom: 100 },
                                     children: itemParagraphs
                                 }),
                                 new TableCell({
-                                    width: { size: 25, type: WidthType.PERCENTAGE },
+                                    width: { size: 1250, type: WidthType.PERCENTAGE },
                                     margins: { left: 100, right: 100, top: 200, bottom: 100 },
                                     children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Rs. ${sel.price_per_plate} /-`, bold: true })] })]
                                 })
@@ -729,7 +729,7 @@ export default function QuotationPage() {
 
         docChildren.push(
             new Table({
-                width: { size: 4000, type: WidthType.DXA },
+                width: { size: 2500, type: WidthType.PERCENTAGE },
                 rows: [
                     makeBankRow("A/c Holder's Name", "THE RAMESHWARAM CAFE", true),
                     makeBankRow("Bank Name", "HDFC BANK LTD", true),
