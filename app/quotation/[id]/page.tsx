@@ -6,6 +6,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, BorderStyle, WidthType, AlignmentType, ImageRun, TableLayoutType } from 'docx'
 
 // Load map dynamically
 const EventMap = dynamic(() => import('../../components/EventMap'), {
@@ -551,39 +552,22 @@ export default function QuotationPage() {
         doc.save(`Quotation_${event.event_code}.pdf`)
     }
 
-    // DOWNLOAD WORD DOC (Updated to match new Layout)
+    // DOWNLOAD WORD DOC (Updated to use native docx library for image embedding)
     const handleDownloadMenuSheet = async () => {
-        const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-        const logoUrl = `${currentOrigin}/logo.png`
+        let logoArrayBuffer: ArrayBuffer | null = null;
+        try {
+            const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+            const response = await fetch(`${currentOrigin}/logo.png`)
+            if (response.ok) {
+                logoArrayBuffer = await response.arrayBuffer()
+            }
+        } catch (error) {
+            console.error("Failed to load logo for Word export", error)
+        }
 
-        const header = `
-      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-      <head><meta charset='utf-8'><title>Quotation</title>
-      <style>
-        body { font-family: 'Arial', sans-serif; font-size: 11pt; color: #000; line-height: 1.4; }
-        .text-center { text-align: center; }
-        .mb-20 { margin-bottom: 20px; }
-        .mb-10 { margin-bottom: 10px; }
-        .uppercase { text-transform: uppercase; }
-        .font-bold { font-weight: bold; }
-        .text-amber { color: #b45309; }
-        .text-red { color: #dc2626; }
-        table.layout-table { width: 100%; border: none; margin-bottom: 20px; }
-        table.layout-table td { border: none; padding: 0; vertical-align: top; }
-        table.data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #000; }
-        table.data-table th, table.data-table td { border: 1px solid #000; padding: 8px; vertical-align: top; }
-        table.bank-table { width: 350px; border-collapse: collapse; font-size: 10pt; text-align: center; }
-        table.bank-table td { border: 1px solid #000; padding: 4px; }
-        .pax-text { font-size: 9pt; font-weight: normal; color: #000; }
-      </style>
-      </head><body>
-    `
-
-        const maxPax = selections.length > 0 ? Math.max(...selections.map(s => s.pax)) : 0
         const formattedDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
         const eventDateStr = new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
         const endDateStr = new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
-        const menuDateStr = new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
 
         let clientDisplayName = 'Client Name'
         if (event.clients) {
@@ -594,27 +578,67 @@ export default function QuotationPage() {
             }
         }
 
-        const logoHtml = `<img src="${logoUrl}" width="250" alt="The Rameshwaram Cafe Logo" style="width: 250px; margin-bottom: 10px;" />`
+        const noBorder = { top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }, bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }, left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }, right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } }
 
-        const eventDetails = `
-      <div class="text-center mb-20" style="margin-top: 20px;">
-        ${logoHtml}
-      </div>
-      <table class="layout-table" style="margin-top: 40px; margin-bottom: 30px;">
-        <tr>
-          <td style="text-align: left; width: 60%;">
-            <p style="margin: 0; color: #000; font-size: 11pt;">To,</p>
-            <p style="margin: 0 0 0 20px; font-weight: bold; color: #000; font-size: 11pt;">${clientDisplayName}</p>
-          </td>
-          <td style="text-align: right; width: 40%;">
-            <p style="margin: 0; color: #000; font-size: 11pt;">Date: ${formattedDate}</p>
-          </td>
-        </tr>
-      </table>
-      <p class="mb-10 font-bold" style="margin-top: 20px; font-size: 10pt; color: #000;">Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}</p>
-    `
+        const docChildren: any[] = []
 
-        let tablesString = ''
+        // 1. Image
+        if (logoArrayBuffer) {
+            docChildren.push(
+                new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [
+                        new ImageRun({
+                            data: logoArrayBuffer,
+                            transformation: { width: 250, height: 75 },
+                            type: "png"
+                        }),
+                    ],
+                    spacing: { after: 400 },
+                })
+            )
+        }
+
+        // 2. Header Table (To Client / Date)
+        docChildren.push(
+            new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: noBorder,
+                rows: [
+                    new TableRow({
+                        children: [
+                            new TableCell({
+                                borders: noBorder,
+                                width: { size: 60, type: WidthType.PERCENTAGE },
+                                children: [
+                                    new Paragraph({ children: [new TextRun("To,")] }),
+                                    new Paragraph({ children: [new TextRun({ text: clientDisplayName, bold: true })] }),
+                                ]
+                            }),
+                            new TableCell({
+                                borders: noBorder,
+                                width: { size: 40, type: WidthType.PERCENTAGE },
+                                children: [
+                                    new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun(`Date: ${formattedDate}`)] }),
+                                ]
+                            })
+                        ]
+                    })
+                ]
+            })
+        )
+
+        // 3. Event Date
+        docChildren.push(
+            new Paragraph({
+                spacing: { before: 200, after: 200 },
+                children: [
+                    new TextRun({ text: `Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}`, bold: true })
+                ]
+            })
+        )
+
+        // 4. Selections
         selections.forEach((sel) => {
             const groupedItems: Record<string, string[]> = {}
             sel.selected_items.forEach((item: string) => {
@@ -623,88 +647,120 @@ export default function QuotationPage() {
                 groupedItems[station].push(item)
             })
 
-            let contentStr = ''
+            const itemParagraphs: Paragraph[] = []
             Object.entries(groupedItems).forEach(([station, items]) => {
                 if (station !== 'OTHER') {
-                    contentStr += `<h4 class="uppercase text-amber" style="margin: 10px 0 2px 0; font-size: 11pt; font-weight: bold;">${station}</h4>`
+                    itemParagraphs.push(new Paragraph({ spacing: { before: 100 }, children: [new TextRun({ text: station, bold: true, color: "b45309" })] }))
                 }
-                contentStr += `<p style="margin: 0; line-height: 1.4; font-size: 11pt; color: #000;">${items.join('<br/>')}</p>`
+                items.forEach(item => {
+                    itemParagraphs.push(new Paragraph({ children: [new TextRun({ text: item })] }))
+                })
             })
 
-            tablesString += `
-            <table class="data-table" style="margin-top: 20px;">
-              <tr>
-                <td colspan="2" class="text-center font-bold" style="background-color: #f9f9f9; padding: 8px; font-size: 11pt; color: #000;">
-                  ${sel.category_title} ( ${sel.pax} PAX )
-                </td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; width: 75%; vertical-align: top;">
-                  ${contentStr}
-                </td>
-                <td class="text-center font-bold" style="vertical-align: top; font-size: 11pt; color: #000; width: 25%; padding-top: 20px;">
-                  Rs. ${sel.price_per_plate} /-
-                </td>
-              </tr>
-            </table>
-            `
+            docChildren.push(
+                new Paragraph({ spacing: { before: 200 } }),
+                new Table({
+                    width: { size: 100, type: WidthType.PERCENTAGE },
+                    layout: TableLayoutType.FIXED,
+                    rows: [
+                        // Category Header
+                        new TableRow({
+                            children: [
+                                new TableCell({
+                                    columnSpan: 2,
+                                    shading: { fill: "f9f9f9" },
+                                    children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 }, children: [new TextRun({ text: `${sel.category_title} ( ${sel.pax} PAX )`, bold: true })] })]
+                                })
+                            ]
+                        }),
+                        // Items & Price
+                        new TableRow({
+                            children: [
+                                new TableCell({
+                                    width: { size: 75, type: WidthType.PERCENTAGE },
+                                    margins: { left: 100, right: 100, top: 100, bottom: 100 },
+                                    children: itemParagraphs
+                                }),
+                                new TableCell({
+                                    width: { size: 25, type: WidthType.PERCENTAGE },
+                                    margins: { left: 100, right: 100, top: 200, bottom: 100 },
+                                    children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Rs. ${sel.price_per_plate} /-`, bold: true })] })]
+                                })
+                            ]
+                        })
+                    ]
+                })
+            )
+            docChildren.push(new Paragraph({ spacing: { after: 200 } })) // Spacer between tables
         })
 
-        const table = tablesString
-
-        const footer = `</body></html>`
-
+        // 5. Notes
         const activeTerms = terms.filter(t => t.selected)
-        const notesHtml = `
-            <div style="margin-top: 40px; margin-bottom: 30px;">
-                <p style="margin-bottom: 10px; font-weight: bold; font-size: 11pt; color: #000;">NOTE:</p>
-                ${activeTerms.length > 0 ? `
-                <ol style="margin-top: 0; padding-left: 20px; font-size: 11pt; color: #000; line-height: 1.5;">
-                    ${activeTerms.map(term => `<li>${term.text}</li>`).join('')}
-                </ol>
-                ` : '<p style="font-size: 11pt; color: #000;">No additional terms.</p>'}
-            </div>
-        `
+        docChildren.push(
+            new Paragraph({ spacing: { before: 400, after: 100 }, children: [new TextRun({ text: "NOTE:", bold: true })] })
+        )
 
-        const bankDetailsHtml = `
-            <div style="margin-top: 20px;">
-                <p style="margin-bottom: 10px; font-weight: bold; font-size: 11pt; color: #000;">Bank Details:</p>
-                <table style="border-collapse: collapse; width: 400px; font-size: 10pt; color: #000; text-align: left;">
-                    <tr>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">A/c Holder's Name</td>
-                        <td style="border: 1px solid #000; padding: 5px 10px; text-transform: uppercase;">THE RAMESHWARAM CAFE</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">Bank Name</td>
-                        <td style="border: 1px solid #000; padding: 5px 10px; text-transform: uppercase;">HDFC BANK LTD</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">A/c No</td>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">50200012345678</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">IFS Code</td>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">HDFC0000123</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #000; padding: 5px 10px;">Branch</td>
-                        <td style="border: 1px solid #000; padding: 5px 10px; text-transform: uppercase;">Vasant Vihar</td>
-                    </tr>
-                </table>
-            </div>
-        `
+        if (activeTerms.length > 0) {
+            activeTerms.forEach((term, index) => {
+                docChildren.push(
+                    new Paragraph({
+                        text: `${index + 1}. ${term.text}`,
+                        spacing: { after: 60 }
+                    })
+                )
+            })
+        } else {
+            docChildren.push(new Paragraph({ text: "No additional terms." }))
+        }
 
-        const sourceHTML = header + eventDetails + table + notesHtml + bankDetailsHtml + footer
+        // 6. Bank Details
+        docChildren.push(
+            new Paragraph({ spacing: { before: 300, after: 100 }, children: [new TextRun({ text: "Bank Details:", bold: true })] })
+        )
 
-        // Reverted to simple HTML export as Google Docs does not support MHTML / Multipart MIME
-        const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML)
+        const makeBankRow = (label: string, val: string, uppercase = false) => {
+            return new TableRow({
+                children: [
+                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ text: label })] }),
+                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: uppercase ? val.toUpperCase() : val })] })] }),
+                ]
+            })
+        }
 
-        const fileDownload = document.createElement("a")
-        document.body.appendChild(fileDownload)
-        fileDownload.href = source
-        fileDownload.download = `Quotation_${event.event_code}.doc`
-        fileDownload.click()
-        document.body.removeChild(fileDownload)
+        docChildren.push(
+            new Table({
+                width: { size: 4000, type: WidthType.DXA },
+                rows: [
+                    makeBankRow("A/c Holder's Name", "THE RAMESHWARAM CAFE", true),
+                    makeBankRow("Bank Name", "HDFC BANK LTD", true),
+                    makeBankRow("A/c No", "50200012345678"),
+                    makeBankRow("IFS Code", "HDFC0000123"),
+                    makeBankRow("Branch", "Vasant Vihar", true),
+                ]
+            })
+        )
+
+        // Generate and Download
+        const docx = new Document({
+            styles: {
+                default: {
+                    document: { run: { font: "Arial", size: 22 } } // 11pt = 22 half-points
+                }
+            },
+            sections: [{
+                properties: {},
+                children: docChildren
+            }]
+        })
+
+        Packer.toBlob(docx).then(blob => {
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = `Quotation_${event.event_code}.docx`
+            link.click()
+            URL.revokeObjectURL(url)
+        })
     }
 
     if (loading) return <div className="min-h-screen flex items-center justify-center font-bold text-stone-400">Loading Quote...</div>
