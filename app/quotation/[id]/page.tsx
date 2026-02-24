@@ -910,7 +910,7 @@ export default function QuotationPage() {
                                     <p className="uppercase font-bold">NOTE:</p>
                                     <button
                                         onClick={() => setTerms([...terms, { id: `custom-${Date.now()}`, text: "New Condition", selected: true }])}
-                                        className="text-xs font-bold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1 rounded transition-colors print:hidden opacity-0 group-hover:opacity-100"
+                                        className="text-xs font-bold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1 rounded transition-colors print:hidden opacity-100 md:opacity-0 md:group-hover:opacity-100"
                                     >
                                         + Add Condition
                                     </button>
@@ -948,7 +948,7 @@ export default function QuotationPage() {
                                             </div>
                                             <button
                                                 onClick={() => setTerms(terms.filter(t => t.id !== term.id))}
-                                                className="text-gray-400 hover:text-red-500 font-bold px-2 print:hidden opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="text-gray-400 hover:text-red-500 font-bold px-2 print:hidden opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                                                 title="Remove Condition"
                                             >
                                                 ✕
