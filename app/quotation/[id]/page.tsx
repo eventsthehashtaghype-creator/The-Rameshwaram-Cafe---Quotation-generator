@@ -590,7 +590,7 @@ export default function QuotationPage() {
                     children: [
                         new ImageRun({
                             data: logoArrayBuffer,
-                            transformation: { width: 250, height: 75 },
+                            transformation: { width: 200, height: 185 }, // Symmetrical scale of the roughly 1:1 original image
                             type: "png"
                         }),
                     ],
