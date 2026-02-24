@@ -669,9 +669,16 @@ export default function QuotationPage() {
                         new TableRow({
                             children: [
                                 new TableCell({
-                                    columnSpan: 2,
+                                    width: { size: 6750, type: WidthType.DXA },
                                     shading: { fill: "f9f9f9" },
+                                    borders: { right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } },
                                     children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 }, children: [new TextRun({ text: `${sel.category_title} ( ${sel.pax} PAX )`, bold: true })] })]
+                                }),
+                                new TableCell({
+                                    width: { size: 2250, type: WidthType.DXA },
+                                    shading: { fill: "f9f9f9" },
+                                    borders: { left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } },
+                                    children: []
                                 })
                             ]
                         }),
