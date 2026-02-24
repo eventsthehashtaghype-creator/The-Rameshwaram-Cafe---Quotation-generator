@@ -25,6 +25,7 @@ export default function QuotationPage() {
 
     // --- EDITING STATE ---
     const [saving, setSaving] = useState(false)
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
     // Schedule
     const [startDate, setStartDate] = useState('')
@@ -89,6 +90,18 @@ export default function QuotationPage() {
             setDays(diff > 0 ? diff : 0)
         }
     }, [startDate, endDate])
+
+    // --- UNSAVED CHANGES GUARD ---
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (hasUnsavedChanges) {
+                e.preventDefault()
+                e.returnValue = '' // Required for Chrome to show prompt
+            }
+        }
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+    }, [hasUnsavedChanges])
 
     async function fetchData() {
         console.log("fetchData started...")
@@ -239,6 +252,7 @@ export default function QuotationPage() {
         let num = parseFloat(value) || 0
         if (num < 0) num = 0 // Enforce non-negative values
         setSelections(prev => prev.map(s => s.id === selectionId ? { ...s, [field]: num } : s))
+        setHasUnsavedChanges(true)
         await supabase.from('menu_selections').update({ [field]: num }).eq('id', selectionId)
     }
 
@@ -297,6 +311,7 @@ export default function QuotationPage() {
         }
 
         setSaving(false)
+        setHasUnsavedChanges(false)
         alert("Event & Client details updated successfully!")
         fetchData() // Refresh
     }
@@ -310,6 +325,7 @@ export default function QuotationPage() {
             setVenueName(loc.address.amenity || loc.address.building)
         }
         setGoogleMapsLink(`https://www.google.com/maps?q=${loc.lat},${loc.lon}`)
+        setHasUnsavedChanges(true)
     }
 
     // CALCULATE TOTALS
@@ -940,12 +956,25 @@ export default function QuotationPage() {
                             <div className="mb-10 group">
                                 <div className="flex items-center justify-between mb-2">
                                     <p className="uppercase font-bold">NOTE:</p>
-                                    <button
-                                        onClick={() => setTerms([...terms, { id: `custom-${Date.now()}`, text: "New Condition", selected: true }])}
-                                        className="text-xs font-bold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1 rounded transition-colors print:hidden opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                                    >
-                                        + Add Condition
-                                    </button>
+                                    {/* Action Buttons */}
+                                    <div className="mt-8 flex gap-4">
+                                        <button
+                                            onClick={() => {
+                                                setTerms([...terms, { id: 't' + Date.now(), text: 'New Condition...', selected: true }])
+                                                setHasUnsavedChanges(true)
+                                            }}
+                                            className="bg-gray-100 hover:bg-gray-200 text-black px-6 py-2 rounded text-sm font-bold uppercase tracking-wide transition shadow-sm active:scale-95 border-2 border-dashed border-gray-300"
+                                        >
+                                            + Add Condition
+                                        </button>
+                                        <button
+                                            onClick={handleSaveSettings}
+                                            disabled={saving || !hasUnsavedChanges}
+                                            className="bg-black text-white px-8 py-2 rounded text-sm font-bold uppercase tracking-wide hover:bg-gray-800 transition shadow-lg active:scale-95 disabled:opacity-50"
+                                        >
+                                            {saving ? 'Saving...' : 'Save Terms'}
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="space-y-2">
                                     {terms.map((term, index) => (
@@ -958,6 +987,7 @@ export default function QuotationPage() {
                                                         const newTerms = [...terms]
                                                         newTerms[index].selected = e.target.checked
                                                         setTerms(newTerms)
+                                                        setHasUnsavedChanges(true)
                                                     }}
                                                     className="w-4 h-4 text-black rounded border-gray-300 focus:ring-black cursor-pointer"
                                                 />
@@ -973,13 +1003,17 @@ export default function QuotationPage() {
                                                         const newTerms = [...terms]
                                                         newTerms[index].text = e.target.value
                                                         setTerms(newTerms)
+                                                        setHasUnsavedChanges(true)
                                                     }}
                                                     className={`w-full bg-transparent border-b border-transparent hover:border-gray-200 focus:border-black outline-none transition-colors ${!term.selected ? 'text-gray-400 line-through decoration-gray-300' : ''}`}
                                                     placeholder="Enter term condition..."
                                                 />
                                             </div>
                                             <button
-                                                onClick={() => setTerms(terms.filter(t => t.id !== term.id))}
+                                                onClick={() => {
+                                                    setTerms(terms.filter(t => t.id !== term.id))
+                                                    setHasUnsavedChanges(true)
+                                                }}
                                                 className="text-gray-400 hover:text-red-500 font-bold px-2 print:hidden opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                                                 title="Remove Condition"
                                             >
@@ -1048,34 +1082,34 @@ export default function QuotationPage() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="col-span-2">
                                             <label className={labelClass}>Client Name</label>
-                                            <input className={inputClass} value={clientName} onChange={e => setClientName(e.target.value)} />
+                                            <input className={inputClass} value={clientName} onChange={e => { setClientName(e.target.value); setHasUnsavedChanges(true) }} />
                                         </div>
-                                        <div><label className={labelClass}>GST Number</label><input className={inputClass} value={clientGst} onChange={e => setClientGst(e.target.value)} /></div>
-                                        <div><label className={labelClass}>Contact Person</label><input className={inputClass} value={clientContact} onChange={e => setClientContact(e.target.value)} /></div>
-                                        <div><label className={labelClass}>Mobile</label><input className={inputClass} value={clientMobile} onChange={e => setClientMobile(e.target.value)} /></div>
-                                        <div><label className={labelClass}>Email</label><input className={inputClass} value={clientEmail} onChange={e => setClientEmail(e.target.value)} /></div>
+                                        <div><label className={labelClass}>GST Number</label><input className={inputClass} value={clientGst} onChange={e => { setClientGst(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                        <div><label className={labelClass}>Contact Person</label><input className={inputClass} value={clientContact} onChange={e => { setClientContact(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                        <div><label className={labelClass}>Mobile</label><input className={inputClass} value={clientMobile} onChange={e => { setClientMobile(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                        <div><label className={labelClass}>Email</label><input className={inputClass} value={clientEmail} onChange={e => { setClientEmail(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     </div>
                                 </div>
 
                                 <div className="space-y-4">
                                     <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Schedule & Type</h4>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div><label className={labelClass}>Start Date</label><input type="date" className={inputClass} value={startDate} onChange={e => { setStartDate(e.target.value); if (!endDate) setEndDate(e.target.value) }} /></div>
-                                        <div><label className={labelClass}>End Date</label><input type="date" className={inputClass} value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} /></div>
+                                        <div><label className={labelClass}>Start Date</label><input type="date" className={inputClass} value={startDate} onChange={e => { setStartDate(e.target.value); setHasUnsavedChanges(true); if (!endDate) setEndDate(e.target.value) }} /></div>
+                                        <div><label className={labelClass}>End Date</label><input type="date" className={inputClass} value={endDate} onChange={e => { setEndDate(e.target.value); setHasUnsavedChanges(true) }} min={startDate} /></div>
                                     </div>
                                     {days > 0 && <div className="bg-gray-100 p-2 rounded text-center text-xs font-bold text-black uppercase tracking-wide">{days} Day Event</div>}
 
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className={labelClass}>Event Type</label>
-                                            <select className={inputClass} value={eventType} onChange={e => setEventType(e.target.value as any)}>
+                                            <select className={inputClass} value={eventType} onChange={e => { setEventType(e.target.value as any); setHasUnsavedChanges(true) }}>
                                                 <option value="B2B">B2B (Corporate)</option>
                                                 <option value="B2C">B2C (Private)</option>
                                             </select>
                                         </div>
                                         <div>
                                             <label className={labelClass}>Size Category</label>
-                                            <select className={inputClass} value={eventSize} onChange={e => setEventSize(e.target.value as any)}>
+                                            <select className={inputClass} value={eventSize} onChange={e => { setEventSize(e.target.value as any); setHasUnsavedChanges(true) }}>
                                                 <option value="Small">Small (Green)</option>
                                                 <option value="Large">Large (Red)</option>
                                             </select>
@@ -1085,10 +1119,10 @@ export default function QuotationPage() {
 
                                 <div className="space-y-4">
                                     <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Point of Contact (Event Specific)</h4>
-                                    <div><label className={labelClass}>POC Name</label><input className={inputClass} value={pocName} onChange={e => setPocName(e.target.value)} /></div>
+                                    <div><label className={labelClass}>POC Name</label><input className={inputClass} value={pocName} onChange={e => { setPocName(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div><label className={labelClass}>Mobile</label><input className={inputClass} value={pocMobile} onChange={e => setPocMobile(e.target.value)} /></div>
-                                        <div><label className={labelClass}>Email</label><input className={inputClass} value={pocEmail} onChange={e => setPocEmail(e.target.value)} /></div>
+                                        <div><label className={labelClass}>Mobile</label><input className={inputClass} value={pocMobile} onChange={e => { setPocMobile(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                        <div><label className={labelClass}>Email</label><input className={inputClass} value={pocEmail} onChange={e => { setPocEmail(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     </div>
                                 </div>
                             </div>
@@ -1102,7 +1136,7 @@ export default function QuotationPage() {
                                     <input
                                         className={`${inputClass} text - blue - 600 underline`}
                                         value={googleMapsLink}
-                                        onChange={e => setGoogleMapsLink(e.target.value)}
+                                        onChange={e => { setGoogleMapsLink(e.target.value); setHasUnsavedChanges(true) }}
                                         placeholder="Paste maps link..."
                                     />
                                 </div>
@@ -1111,11 +1145,11 @@ export default function QuotationPage() {
                                     <EventMap onLocationSelect={handleMapSelect} />
                                 </div>
 
-                                <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text - lg`} value={venueName} onChange={e => setVenueName(e.target.value)} /></div>
-                                <div><label className={labelClass}>Address</label><textarea className={`${inputClass} h - 20`} value={fullAddress} onChange={e => setFullAddress(e.target.value)} /></div>
+                                <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text - lg`} value={venueName} onChange={e => { setVenueName(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                <div><label className={labelClass}>Address</label><textarea className={`${inputClass} h - 20`} value={fullAddress} onChange={e => { setFullAddress(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className={labelClass}>City</label><input className={inputClass} value={city} onChange={e => setCity(e.target.value)} /></div>
-                                    <div><label className={labelClass}>State</label><input className={inputClass} value={state} onChange={e => setState(e.target.value)} /></div>
+                                    <div><label className={labelClass}>City</label><input className={inputClass} value={city} onChange={e => { setCity(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                    <div><label className={labelClass}>State</label><input className={inputClass} value={state} onChange={e => { setState(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                 </div>
                             </div>
 
