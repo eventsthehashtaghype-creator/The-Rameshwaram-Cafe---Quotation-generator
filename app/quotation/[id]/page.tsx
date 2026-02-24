@@ -553,42 +553,8 @@ export default function QuotationPage() {
 
     // DOWNLOAD WORD DOC (Updated to match new Layout)
     const handleDownloadMenuSheet = async () => {
-        let base64Logo = ''
-        try {
-            const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-            const response = await fetch(`${currentOrigin}/logo.png`)
-            if (response.ok) {
-                const blob = await response.blob()
-                base64Logo = await new Promise<string>((resolve, reject) => {
-                    const img = new Image()
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas')
-                        const MAX_WIDTH = 400
-                        let width = img.width
-                        let height = img.height
-
-                        if (width > MAX_WIDTH) {
-                            height = Math.round((height * MAX_WIDTH) / width)
-                            width = MAX_WIDTH
-                        }
-
-                        canvas.width = width
-                        canvas.height = height
-                        const ctx = canvas.getContext('2d')
-                        if (ctx) {
-                            ctx.drawImage(img, 0, 0, width, height)
-                            resolve(canvas.toDataURL('image/png'))
-                        } else {
-                            resolve('')
-                        }
-                    }
-                    img.onerror = reject
-                    img.src = URL.createObjectURL(blob)
-                })
-            }
-        } catch (error) {
-            console.error("Failed to load logo for Word export", error)
-        }
+        const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+        const logoUrl = `${currentOrigin}/logo.png`
 
         const header = `
       <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
@@ -628,7 +594,7 @@ export default function QuotationPage() {
             }
         }
 
-        const logoHtml = base64Logo ? `<img src="${base64Logo}" alt="The Rameshwaram Cafe Logo" style="width: 250px; margin-bottom: 10px;" />` : ''
+        const logoHtml = `<img src="${logoUrl}" width="250" alt="The Rameshwaram Cafe Logo" style="width: 250px; margin-bottom: 10px;" />`
 
         const eventDetails = `
       <div class="text-center mb-20" style="margin-top: 20px;">
