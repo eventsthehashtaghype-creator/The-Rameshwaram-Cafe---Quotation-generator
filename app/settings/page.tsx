@@ -45,6 +45,17 @@ export default function SettingsPage() {
   const [defaultTandC, setDefaultTandC] = useState('')
   const [defaultValidity, setDefaultValidity] = useState(14)
 
+  // Financial Details Fields
+  const [bankName, setBankName] = useState('')
+  const [bankAccountName, setBankAccountName] = useState('')
+  const [bankAccountNo, setBankAccountNo] = useState('')
+  const [bankIfsc, setBankIfsc] = useState('')
+  const [bankBranch, setBankBranch] = useState('')
+
+  // State for Global Save bar
+  const [saving, setSaving] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+
   // User Management Fields
   const [users, setUsers] = useState<UserProfile[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -78,6 +89,13 @@ export default function SettingsPage() {
         setCompanyAddress(s.company_address || '')
         setDefaultTandC(s.default_t_and_c || '')
         setDefaultValidity(s.default_validity_days || 14)
+
+        // Load Financial Details
+        setBankName(s.bank_name || '')
+        setBankAccountName(s.bank_account_name || '')
+        setBankAccountNo(s.bank_account_no || '')
+        setBankIfsc(s.bank_ifsc || '')
+        setBankBranch(s.bank_branch || '')
       }
 
       // Fetch users
@@ -86,6 +104,18 @@ export default function SettingsPage() {
     }
     init()
   }, [])
+
+  // UNSAVED CHANGES GUARD
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 
   async function fetchUsers() {
     // Get token natively every time since the state might not be instantly available on first load
@@ -110,6 +140,7 @@ export default function SettingsPage() {
   }
 
   async function saveSettings() {
+    setSaving(true)
     await supabase.from('app_settings').upsert({
       id: 1,
       reminder_days: reminderDays,
@@ -118,8 +149,15 @@ export default function SettingsPage() {
       company_phone: companyPhone,
       company_address: companyAddress,
       default_t_and_c: defaultTandC,
-      default_validity_days: defaultValidity
+      default_validity_days: defaultValidity,
+      bank_name: bankName,
+      bank_account_name: bankAccountName,
+      bank_account_no: bankAccountNo,
+      bank_ifsc: bankIfsc,
+      bank_branch: bankBranch
     });
+    setSaving(false)
+    setHasUnsavedChanges(false)
     alert("Settings Saved Successfully")
   }
 
@@ -227,35 +265,108 @@ export default function SettingsPage() {
         </div>
 
         {activeTab === 'general' ? (
-          <div className="max-w-4xl space-y-6">
+          <div className="max-w-4xl space-y-8 pb-32">
+
+            {/* COMPANY PROFILE */}
             <div className="bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 mb-6">Company Profile</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Company Name</label><input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={companyName} onChange={e => setCompanyName(e.target.value)} /></div>
-                <div><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Support Phone</label><input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={companyPhone} onChange={e => setCompanyPhone(e.target.value)} /></div>
-                <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Registered Address</label><textarea rows={2} className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={companyAddress} onChange={e => setCompanyAddress(e.target.value)} /></div>
+              <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                <span className="text-blue-500">🏢</span> Company Identity
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Company Name</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={companyName} onChange={e => { setCompanyName(e.target.value); setHasUnsavedChanges(true); }} placeholder="e.g. The Rameshwaram Cafe" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Support Phone / Contact</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={companyPhone} onChange={e => { setCompanyPhone(e.target.value); setHasUnsavedChanges(true); }} placeholder="e.g. +91 99999 99999" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Registered Address</label>
+                  <textarea rows={2} className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={companyAddress} onChange={e => { setCompanyAddress(e.target.value); setHasUnsavedChanges(true); }} placeholder="Full registered address of the venue..." />
+                </div>
               </div>
             </div>
 
+            {/* FINANCIAL DETAILS */}
             <div className="bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 mb-6">Quotation Defaults</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Default Validity (Days)</label><input type="number" min="1" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={defaultValidity} onChange={e => setDefaultValidity(Math.max(1, parseInt(e.target.value) || 1))} /></div>
-                <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Default Terms & Conditions</label><textarea rows={4} className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={defaultTandC} onChange={e => setDefaultTandC(e.target.value)} placeholder="These terms will automatically populate new quotations..." /></div>
+              <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                <span className="text-emerald-500">🏦</span> Financial & Bank Details
+              </h2>
+              <p className="text-xs font-bold text-slate-500 mb-6">These details are dynamically injected into PDF and Word Document Quotations.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Account Name (Beneficiary)</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={bankAccountName} onChange={e => { setBankAccountName(e.target.value); setHasUnsavedChanges(true); }} placeholder="e.g. THE RAMESHWARAM CAFE" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Bank Name</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={bankName} onChange={e => { setBankName(e.target.value); setHasUnsavedChanges(true); }} placeholder="e.g. HDFC BANK LTD" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Account Number</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-mono text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={bankAccountNo} onChange={e => { setBankAccountNo(e.target.value); setHasUnsavedChanges(true); }} placeholder="Account No" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">IFSC Code</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-mono uppercase text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={bankIfsc} onChange={e => { setBankIfsc(e.target.value.toUpperCase()); setHasUnsavedChanges(true); }} placeholder="IFSC Code" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Branch</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={bankBranch} onChange={e => { setBankBranch(e.target.value); setHasUnsavedChanges(true); }} placeholder="Branch Name" />
+                </div>
               </div>
             </div>
 
+            {/* QUOTATION DEFAULTS */}
             <div className="bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 mb-6">Automation Preferences</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Event Reminder (Days Before)</label><input type="number" min="0" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={reminderDays} onChange={e => setReminderDays(Math.max(0, parseInt(e.target.value) || 0))} /></div>
-                <div><label className="block text-xs font-bold text-slate-400 uppercase mb-2">Admin Email</label><input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} /></div>
+              <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                <span className="text-purple-500">📄</span> Quotation Defaults
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Default Validity (Days)</label>
+                  <input type="number" min="1" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={defaultValidity} onChange={e => { setDefaultValidity(Math.max(1, parseInt(e.target.value) || 1)); setHasUnsavedChanges(true); }} />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Default Terms & Conditions</label>
+                  <textarea rows={4} className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={defaultTandC} onChange={e => { setDefaultTandC(e.target.value); setHasUnsavedChanges(true); }} placeholder="These terms will automatically populate new quotations..." />
+                </div>
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
-              <button onClick={saveSettings} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition">Save Changes</button>
+            {/* AUTOMATION PREFERENCES */}
+            <div className="bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100">
+              <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                <span className="text-amber-500">⚙️</span> Automation Preferences
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Event Reminder (Days Before)</label>
+                  <input type="number" min="0" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={reminderDays} onChange={e => { setReminderDays(Math.max(0, parseInt(e.target.value) || 0)); setHasUnsavedChanges(true); }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Admin Email</label>
+                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={adminEmail} onChange={e => { setAdminEmail(e.target.value); setHasUnsavedChanges(true); }} />
+                </div>
+              </div>
             </div>
+
+            {/* FLOATING SAVE BAR */}
+            {hasUnsavedChanges && (
+              <div className="fixed bottom-0 left-0 right-0 lg:left-64 bg-yellow-400 text-black p-4 z-50 flex flex-col sm:flex-row justify-between items-center shadow-[0_-10px_40px_rgba(0,0,0,0.15)] animate-in slide-in-from-bottom-full duration-300">
+                <div className="font-black mb-3 sm:mb-0 text-sm sm:text-base flex items-center gap-2">
+                  <span>⚠️</span> You have unsaved changes to your general configuration!
+                </div>
+                <button
+                  onClick={saveSettings}
+                  disabled={saving}
+                  className="w-full sm:w-auto bg-black text-white px-8 py-3 rounded-xl font-black uppercase tracking-wider hover:bg-gray-800 transition shadow-lg active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {saving ? 'Saving...' : 'Save Configuration'}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="max-w-5xl">

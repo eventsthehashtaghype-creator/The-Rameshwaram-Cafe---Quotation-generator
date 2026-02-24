@@ -22,6 +22,7 @@ export default function QuotationPage() {
     const [selections, setSelections] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'quote')
+    const [appSettings, setAppSettings] = useState<any>(null)
 
     // --- EDITING STATE ---
     const [saving, setSaving] = useState(false)
@@ -106,8 +107,13 @@ export default function QuotationPage() {
     async function fetchData() {
         console.log("fetchData started...")
         try {
-            // 1. Fetch Event
+            // 1. Fetch Event & Global Settings
             const { data: eventData, error: eventError } = await supabase.from('events').select(`*, clients(*)`).eq('id', id).single()
+            const { data: settingsData } = await supabase.from('app_settings').select('*').single()
+
+            if (settingsData) {
+                setAppSettings(settingsData)
+            }
 
             if (eventError) {
                 console.error("Error fetching event:", eventError)
@@ -541,11 +547,11 @@ export default function QuotationPage() {
         autoTable(doc, {
             startY: yPos + 3,
             body: [
-                ["A/c Holder's Name", "THE RAMESHWARAM CAFE"],
-                ["Bank Name", "HDFC BANK LTD"],
-                ["A/c No", "50200012345678"],
-                ["IFS Code", "HDFC0000123"],
-                ["Branch", "VASANT VIHAR"]
+                ["A/c Holder's Name", appSettings?.bank_account_name || "THE RAMESHWARAM CAFE"],
+                ["Bank Name", appSettings?.bank_name || "HDFC BANK LTD"],
+                ["A/c No", appSettings?.bank_account_no || "50200012345678"],
+                ["IFS Code", appSettings?.bank_ifsc || "HDFC0000123"],
+                ["Branch", appSettings?.bank_branch || "VASANT VIHAR"]
             ],
             theme: 'grid',
             styles: {
@@ -757,11 +763,11 @@ export default function QuotationPage() {
                 width: { size: 9000, type: WidthType.DXA },
                 columnWidths: [4500, 4500],
                 rows: [
-                    makeBankRow("A/c Holder's Name", "THE RAMESHWARAM CAFE", true),
-                    makeBankRow("Bank Name", "HDFC BANK LTD", true),
-                    makeBankRow("A/c No", "50200012345678"),
-                    makeBankRow("IFS Code", "HDFC0000123"),
-                    makeBankRow("Branch", "Vasant Vihar", true),
+                    makeBankRow("A/c Holder's Name", appSettings?.bank_account_name || "THE RAMESHWARAM CAFE", true),
+                    makeBankRow("Bank Name", appSettings?.bank_name || "HDFC BANK LTD", true),
+                    makeBankRow("A/c No", appSettings?.bank_account_no || "50200012345678"),
+                    makeBankRow("IFS Code", appSettings?.bank_ifsc || "HDFC0000123"),
+                    makeBankRow("Branch", appSettings?.bank_branch || "Vasant Vihar", true),
                 ]
             })
         )
