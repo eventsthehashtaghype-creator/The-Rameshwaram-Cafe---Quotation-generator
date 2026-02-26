@@ -9,4 +9,3 @@ export const supabase = createClient(
     supabaseUrl || 'https://placeholder.supabase.co',
     supabaseAnonKey || 'placeholder'
 )
-// Force Vercel Rebuild - Timestamp: 2026-02-18
