@@ -97,7 +97,7 @@ export default function Dashboard() {
     if (s === 'confirmed') return <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">● CONFIRMED</span>
 
     if (event.quote_status === 'client_submitted')
-      return <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">● UPDATE RECVD</span>
+      return <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">● CLIENT REQUEST PENDING</span>
 
     if (s === 'sent') return <span className="px-3 py-1 bg-blue-50 text-blue-600 text-[10px] font-black uppercase rounded tracking-wide border border-blue-100">● SENT</span>
 

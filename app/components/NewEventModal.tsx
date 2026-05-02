@@ -42,10 +42,10 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
   const [city, setCity] = useState('')
   const [state, setState] = useState('')
   const [googleMapsLink, setGoogleMapsLink] = useState('')
+  const [venueZipcode, setVenueZipcode] = useState('')
 
   // New Fields
   const [eventType, setEventType] = useState<'B2B' | 'B2C'>('B2C') // Default B2C
-  const [eventSize, setEventSize] = useState<'Small' | 'Large'>('Small') // Default Small
 
   // Validation State
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -62,7 +62,7 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
     setSelectedClientId(client.id.toString())
     setClientName(client.entity_name)
     setClientGst(client.gst_number || '')
-    setEventType(client.gst_number ? 'B2B' : 'B2C') // Auto-set B2B/B2C based on GST
+    setEventType(client.gst_number ? 'B2B' : 'B2C')
     setClientContact(client.contact_person)
     setClientMobile(client.mobile)
     setClientEmail(client.email)
@@ -126,6 +126,9 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
 
     const possibleState = loc.address.state || loc.address.region || ''
     const possibleCity = loc.address.city || loc.address.town || loc.address.village || loc.address.county || ''
+    const possibleZip = loc.address.postcode || ''
+
+    if (possibleZip) setVenueZipcode(possibleZip)
 
     // Try to match State loosely
     const stateMatch = Object.keys(INDIAN_STATES).find(s => s.toLowerCase() === possibleState.toLowerCase())
@@ -201,9 +204,9 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
       client_id: finalClientId,
       event_date: startDate, end_date: endDate || startDate,
       event_code: code, status: 'draft',
-      venue_name: venueName, venue_address: fullAddress, city, state,
+      venue_name: venueName, venue_address: fullAddress, venue_zipcode: venueZipcode, city, state,
       google_maps_link: googleMapsLink,
-      event_type: eventType, event_size: eventSize,
+      event_type: eventType,
       poc_name: pocName, poc_mobile: pocMobile, poc_email: pocEmail,
       pax_count: 0
     }])
@@ -306,39 +309,35 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
 
                 <div className={`space-y-4 ${!selectedClientId ? 'opacity-50 grayscale' : 'opacity-100'}`}>
                   <div><label className={labelClass}>Company Name</label><input className={inputClass} value={clientName} onChange={e => setClientName(e.target.value)} disabled={!isNewClientMode} /></div>
-                  <div>
-                    <label className={labelClass}>GST Number {clientGst.length > 0 && `(${clientGst.length}/15)`}</label>
-                    <input
-                      className={inputClass}
-                      value={clientGst}
-                      onChange={e => {
-                        const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15) // Limit to 15 chars, alphanumeric
-                        setClientGst(val)
-                        setEventType(val.length === 15 ? 'B2B' : 'B2C') // Auto-switch logic
-                      }}
-                      disabled={!isNewClientMode && selectedClientId !== 'NEW' && selectedClientId !== null}
-                      placeholder="e.g. 29AAAAA0000A1Z5"
-                      maxLength={15}
-                    />
-                  </div>
-
-                  {/* NEW: Event Type & Size */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-blue-50 p-3 rounded border border-blue-100">
+                  {/* Event Type & GST */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Event Type (Auto)</label>
-                      <div className="font-bold text-sm text-black">{eventType}</div>
-                    </div>
-                    <div>
-                      <label className={labelClass}>Event Size (Select)</label>
+                      <label className={labelClass}>Event Type</label>
                       <select
                         className={inputClass}
-                        value={eventSize}
-                        onChange={e => setEventSize(e.target.value as 'Small' | 'Large')}
+                        value={eventType}
+                        onChange={e => setEventType(e.target.value as 'B2B' | 'B2C')}
                       >
-                        <option value="Small">Small</option>
-                        <option value="Large">Large</option>
+                        <option value="B2C">Private / B2C</option>
+                        <option value="B2B">Corporate / B2B</option>
                       </select>
                     </div>
+                    {eventType === 'B2B' && (
+                      <div>
+                        <label className={labelClass}>GST Number {clientGst.length > 0 && `(${clientGst.length}/15)`}</label>
+                        <input
+                          className={inputClass}
+                          value={clientGst}
+                          onChange={e => {
+                            const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15) // Limit to 15 chars, alphanumeric
+                            setClientGst(val)
+                          }}
+                          disabled={!isNewClientMode && selectedClientId !== 'NEW' && selectedClientId !== null}
+                          placeholder="e.g. 29AAAAA0000A1Z5"
+                          maxLength={15}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -503,6 +502,7 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
                 <div className="space-y-4 mt-auto">
                   <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text-lg bg-gray-50`} value={venueName} onChange={e => setVenueName(e.target.value)} placeholder="e.g. Shangri-La Hotel" /></div>
                   <div><label className={labelClass}>Full Address</label><textarea className={`${inputClass} h-24 font-medium`} value={fullAddress} onChange={e => setFullAddress(e.target.value)} /></div>
+                  <div><label className={labelClass}>Zip Code / Pincode</label><input type="text" className={inputClass} value={venueZipcode} onChange={e => setVenueZipcode(e.target.value)} placeholder="e.g. 560001" /></div>
                 </div>
               </div>
             </div>

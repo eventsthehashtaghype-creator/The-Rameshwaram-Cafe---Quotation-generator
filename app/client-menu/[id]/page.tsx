@@ -150,15 +150,57 @@ function ClientMenuContent() {
         setSessionConfig(prev => ({ ...prev, [key]: num }))
     }
 
-    const toggleMenuItem = (item: string) => {
+    const toggleMenuItem = (item: string, station?: any) => {
         if (!activeSession) return
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+        
         setMenuSelections(prev => {
             const current = prev[key] || []
-            return current.includes(item)
+            const isSelected = current.includes(item)
+
+            if (!isSelected && station && station.selection_type) {
+                const match = station.selection_type.match(/\d+/)
+                if (match) {
+                    const limit = parseInt(match[0])
+                    const stationItemNames = station.items.map((i: any) => i.name)
+                    const currentlySelected = current.filter(name => stationItemNames.includes(name)).length
+                    
+                    if (currentlySelected >= limit) {
+                        alert(`You can only select up to ${limit} items from ${station.name}.`)
+                        return current
+                    }
+                }
+            }
+
+            return isSelected
                 ? { ...prev, [key]: current.filter(i => i !== item) }
                 : { ...prev, [key]: [...current, item] }
         })
+    }
+
+    const getPricePerPlate = (mealType: string, pax: number, totalDays: number): number => {
+        const paxSafe = pax || 0
+        
+        if (mealType.toUpperCase() === 'BANANA LEAF MEAL') {
+             if (paxSafe >= 1000) return 1800
+             if (paxSafe >= 500) return 2000
+             if (paxSafe >= 200) return 2500
+             return 3000 // 100 pax base
+        }
+
+        // Standard Slabs (Breakfast, Lunch, High Tea, Dinner)
+        if (paxSafe >= 1000) {
+            return 1000
+        } else if (paxSafe >= 500) {
+            return 1200
+        } else if (paxSafe >= 200) {
+            if (totalDays >= 2) return 1300
+            else return 1500
+        } else { // 100 pax base
+            if (totalDays >= 3) return 1500
+            else if (totalDays === 2) return 1800
+            else return 2000
+        }
     }
 
     const calculateTotal = () => {
@@ -166,7 +208,10 @@ function ClientMenuContent() {
         Object.keys(sessionConfig).forEach(key => {
             const [dayIdx, catId] = key.split('_')
             const cat = menuData.find(c => c.id === catId)
-            if (cat) total += (sessionConfig[key] * cat.default_price)
+            const pax = sessionConfig[key]
+            if (cat && pax > 0) {
+                total += (getPricePerPlate(cat.title, pax, eventDays.length) * pax)
+            }
         })
         return total
     }
@@ -376,14 +421,15 @@ function ClientMenuContent() {
             const [dayIdx, catId] = key.split('_')
             const dayIndex = parseInt(dayIdx)
             const cat = menuData.find(c => c.id === catId)
+            const pax = sessionConfig[key]
 
-            if (cat) {
+            if (cat && pax > 0) {
                 payload.push({
                     event_id: id,
                     category_id: catId,
                     category_title: `Day ${dayIndex + 1} (${eventDays[dayIndex]}) - ${cat.title}`,
-                    pax: sessionConfig[key],
-                    price_per_plate: cat.default_price,
+                    pax: pax,
+                    price_per_plate: getPricePerPlate(cat.title, pax, eventDays.length),
                     selected_items: JSON.stringify(menuSelections[key] || [])
                 })
             }
@@ -458,7 +504,7 @@ function ClientMenuContent() {
                                         <tr key={cat.id} className="hover:bg-gray-50 transition group">
                                             <td className="p-6 font-bold text-xl text-gray-800 border-b border-gray-100 group-last:border-0">
                                                 {cat.title}
-                                                <div className="text-xs font-normal text-gray-400 mt-1">Starts at ₹{cat.default_price}</div>
+                                                <div className="text-xs font-normal text-gray-400 mt-1">Starting at ₹{cat.title.toUpperCase() === 'BANANA LEAF MEAL' ? '1800' : '1000'}</div>
                                             </td>
                                             {eventDays.map((_, dayIndex) => {
                                                 const key = getSessionKey(dayIndex, cat.id)
@@ -512,7 +558,7 @@ function ClientMenuContent() {
                                                 <div key={cat.id} className="p-4 flex items-center justify-between">
                                                     <div>
                                                         <div className="font-bold text-gray-800">{cat.title}</div>
-                                                        <div className="text-xs text-gray-400">₹{cat.default_price} / plate</div>
+                                                        <div className="text-xs text-gray-400">Starts at ₹{cat.title.toUpperCase() === 'BANANA LEAF MEAL' ? '1800' : '1000'} / plate</div>
                                                     </div>
 
                                                     {isEnabled ? (
@@ -567,26 +613,31 @@ function ClientMenuContent() {
                                 const dayIndex = parseInt(dayIdx)
                                 const cat = menuData.find(c => c.id === catId)
                                 const itemsCount = (menuSelections[key] || []).length
+                                const isFixedMenu = cat?.title.toUpperCase() === 'BANANA LEAF MEAL'
+                                const currentPax = sessionConfig[key] || 0
+                                const currentPrice = getPricePerPlate(cat?.title || '', currentPax, eventDays.length)
 
                                 return (
                                     <div
                                         key={key}
-                                        onClick={() => { setActiveSession({ dayIndex, categoryId: catId }); setStep(3) }}
-                                        className={`bg-white p-8 rounded-xl shadow-sm border-2 transition-all duration-200 cursor-pointer group hover:-translate-y-1 hover:shadow-lg ${itemsCount > 0 ? 'border-black' : 'border-transparent hover:border-gray-200'}`}
+                                        onClick={() => { if (!isFixedMenu) { setActiveSession({ dayIndex, categoryId: catId }); setStep(3) } }}
+                                        className={`bg-white p-8 rounded-xl shadow-sm border-2 transition-all duration-200 ${isFixedMenu ? 'cursor-default border-gray-200' : 'cursor-pointer group hover:-translate-y-1 hover:shadow-lg'} ${itemsCount > 0 ? 'border-black' : 'border-transparent hover:border-gray-200'}`}
                                     >
                                         <div className="flex justify-between items-start mb-6">
                                             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Day {dayIndex + 1}</span>
-                                            {itemsCount > 0 && <span className="bg-black text-white text-[10px] font-bold px-3 py-1 rounded-full">{itemsCount} Selected</span>}
+                                            {!isFixedMenu && itemsCount > 0 && <span className="bg-black text-white text-[10px] font-bold px-3 py-1 rounded-full">{itemsCount} Selected</span>}
+                                            {isFixedMenu && <span className="bg-green-100 text-green-800 text-[10px] font-bold px-3 py-1 rounded-full border border-green-200">Fixed Menu</span>}
                                         </div>
                                         <h3 className="text-2xl font-black text-gray-900 mb-1 group-hover:text-gray-600 transition-colors">{cat?.title}</h3>
-                                        <p className="text-sm font-bold text-gray-500">{eventDays[dayIndex]}</p>
+                                        <p className="text-sm font-bold text-gray-500 mb-2">{eventDays[dayIndex]}</p>
+                                        <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded">₹ {currentPrice} / plate</p>
 
                                         <div className="mt-8 flex justify-between items-end">
                                             <div className="text-gray-900">
                                                 <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">Guests</div>
-                                                <div className="font-bold text-xl">{sessionConfig[key]}</div>
+                                                <div className="font-bold text-xl">{currentPax}</div>
                                             </div>
-                                            <span className="text-xs font-bold uppercase tracking-widest text-black underline opacity-0 group-hover:opacity-100 transition-opacity">Customize →</span>
+                                            {!isFixedMenu && <span className="text-xs font-bold uppercase tracking-widest text-black underline opacity-0 group-hover:opacity-100 transition-opacity">Customize →</span>}
                                         </div>
                                     </div>
                                 )
@@ -639,7 +690,7 @@ function ClientMenuContent() {
                                                                 return (
                                                                     <div
                                                                         key={item.id}
-                                                                        onClick={() => toggleMenuItem(item.name)}
+                                                                        onClick={() => toggleMenuItem(item.name, station)}
                                                                         className={`p-3 md:p-4 rounded-lg border-2 cursor-pointer flex items-center gap-3 md:gap-4 transition-all duration-200 group ${isSelected ? 'bg-black text-white border-black shadow-lg' : 'bg-white border-gray-200 hover:border-gray-400 hover:shadow-sm'}`}
                                                                     >
                                                                         <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'border-white' : 'border-gray-300 group-hover:border-gray-400'}`}>
@@ -694,17 +745,26 @@ function ClientMenuContent() {
                                                     const cat = menuData.find(c => c.id === catId)
                                                     const items = menuSelections[key] || []
 
+                                                    const isFixedMenu = cat?.title.toUpperCase() === 'BANANA LEAF MEAL'
+                                                    const currentPax = sessionConfig[key] || 0
+                                                    const currentPrice = getPricePerPlate(cat?.title || '', currentPax, eventDays.length)
+
                                                     return (
                                                         <div key={key} className="bg-gray-50 p-6 rounded-xl border border-gray-100 flex flex-col md:flex-row gap-6">
                                                             <div className="md:w-1/4 pt-1">
                                                                 <h4 className="font-black text-xl uppercase text-gray-900 leading-none mb-2">{cat?.title}</h4>
-                                                                <p className="text-sm font-bold text-gray-400 uppercase tracking-wide">{sessionConfig[key]} Guests</p>
+                                                                <p className="text-sm font-bold text-gray-400 uppercase tracking-wide">{currentPax} Guests</p>
+                                                                <p className="text-xs font-bold text-amber-600 mt-2">₹ {currentPrice} / plate</p>
                                                             </div>
 
                                                             <div className="flex-1">
                                                                 <div className="flex flex-wrap gap-2">
                                                                     {items.length === 0 ? (
-                                                                        <span className="text-red-500 bg-red-50 px-3 py-1 rounded text-xs font-bold italic border border-red-100">Selection Pending</span>
+                                                                        isFixedMenu ? (
+                                                                            <span className="text-green-600 bg-green-50 px-3 py-1 rounded text-xs font-bold border border-green-100">Fixed Traditional Menu</span>
+                                                                        ) : (
+                                                                            <span className="text-red-500 bg-red-50 px-3 py-1 rounded text-xs font-bold italic border border-red-100">Selection Pending</span>
+                                                                        )
                                                                     ) : items.map((it, idx) => (
                                                                         <span key={idx} className="text-sm font-bold bg-white border border-gray-200 px-3 py-1.5 rounded-lg text-gray-700 shadow-sm">{it}</span>
                                                                     ))}
