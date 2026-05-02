@@ -167,7 +167,7 @@ function ClientMenuContent() {
                     
                     if (currentlySelected >= limit) {
                         alert(`You can only select up to ${limit} items from ${station.name}.`)
-                        return current
+                        return prev
                     }
                 }
             }
