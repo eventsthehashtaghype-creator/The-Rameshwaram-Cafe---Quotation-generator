@@ -45,6 +45,14 @@ export default function Dashboard() {
     fetchEvents()
   }
 
+  const handleApproveEdit = async (id: string) => {
+    setActiveMenuId(null)
+    const confirmed = window.confirm("Approve edit request? The client will be able to edit their menu again.")
+    if (!confirmed) return
+    await supabase.from('events').update({ status: 'draft', quote_status: 'draft' }).eq('id', id)
+    fetchEvents()
+  }
+
   const startEditingNote = (event: any) => { setEditingNoteId(event.id); setNoteText(event.internal_notes || '') }
 
   const saveNote = async (id: string) => {
@@ -95,6 +103,9 @@ export default function Dashboard() {
 
     if (s === 'cancelled') return <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">● CANCELLED</span>
     if (s === 'confirmed') return <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">● CONFIRMED</span>
+
+    if (event.quote_status === 'edit_requested' || s === 'edit_requested')
+      return <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[10px] font-black uppercase rounded tracking-wide border border-purple-100">● EDIT REQUESTED</span>
 
     if (event.quote_status === 'client_submitted')
       return <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">● CLIENT REQUEST PENDING</span>
@@ -222,6 +233,9 @@ export default function Dashboard() {
                                     <div className="p-2 border-b bg-gray-50 text-[10px] font-black text-gray-400 uppercase">Manage</div>
                                     <Link href={`/client-menu/${event.id}`} target="_blank" className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">👁️ Preview Menu</Link>
                                     <Link href={`/quotation/${event.id}?tab=settings`} className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">✏️ Edit Details</Link>
+                                    {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') && (
+                                      <button onClick={() => handleApproveEdit(event.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-purple-700 hover:bg-purple-50 border-b border-gray-50">🔓 Approve Edit</button>
+                                    )}
                                     <button onClick={() => handleStatusChange(event.id, 'confirmed')} className="w-full text-left px-4 py-3 text-xs font-bold text-green-700 hover:bg-green-50">✅ Confirm</button>
                                     <button onClick={() => handleStatusChange(event.id, 'cancelled')} className="w-full text-left px-4 py-3 text-xs font-bold text-red-700 hover:bg-red-50">⛔ Cancel</button>
                                   </div>

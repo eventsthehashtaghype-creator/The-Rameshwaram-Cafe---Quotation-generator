@@ -53,6 +53,21 @@ export default function PortalDashboard() {
     router.push('/portal/login')
   }
 
+  const handleRequestEdit = async (eventId: string) => {
+    const { error } = await supabase
+      .from('events')
+      .update({ quote_status: 'edit_requested', status: 'edit_requested' })
+      .eq('id', eventId)
+
+    if (!error) {
+      setEvents(events.map(e => e.id === eventId ? { ...e, quote_status: 'edit_requested', status: 'edit_requested' } : e))
+      alert('Edit request sent successfully. Admin will review your request.')
+    } else {
+      alert('Failed to send edit request.')
+      console.error(error)
+    }
+  }
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-[#F3F4F6] text-gray-400 font-bold">Loading your dashboard...</div>
   }
@@ -121,19 +136,42 @@ export default function PortalDashboard() {
                       <div className="text-[10px] text-gray-400 font-medium mt-1">{event.pax_count} Pax</div>
                     </td>
                     <td className="px-6 py-5">
-                      {event.status === 'draft' && <span className="px-3 py-1 bg-gray-100 text-gray-600 text-[10px] font-black uppercase rounded tracking-wide border border-gray-200">Draft</span>}
-                      {event.status === 'pending_admin_approval' && <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">Reviewing</span>}
+                      {event.status === 'draft' && event.quote_status !== 'edit_requested' && <span className="px-3 py-1 bg-gray-100 text-gray-600 text-[10px] font-black uppercase rounded tracking-wide border border-gray-200">Draft</span>}
+                      {(event.status === 'pending_admin_approval' || (event.quote_status === 'client_submitted' && event.status !== 'edit_requested')) && <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">Reviewing</span>}
                       {event.status === 'sent' && <span className="px-3 py-1 bg-blue-50 text-blue-600 text-[10px] font-black uppercase rounded tracking-wide border border-blue-100">Quote Ready</span>}
                       {event.status === 'confirmed' && <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">Confirmed</span>}
                       {event.status === 'cancelled' && <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">Cancelled</span>}
+                      {(event.status === 'edit_requested' || event.quote_status === 'edit_requested') && <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[10px] font-black uppercase rounded tracking-wide border border-purple-100">Edit Requested</span>}
                     </td>
                     <td className="px-6 py-5 text-right">
-                      <Link 
-                        href={`/portal/request/${event.id}`} 
-                        className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition"
-                      >
-                        View Details
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <Link 
+                          href={`/client-menu/${event.id}?preview=true`} 
+                          className="text-xs font-bold text-gray-600 bg-gray-50 px-3 py-2 rounded-lg hover:bg-gray-100 transition"
+                        >
+                          View Selection
+                        </Link>
+                        
+                        {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
+                          <button disabled className="text-xs font-bold text-purple-600 bg-purple-50 px-3 py-2 rounded-lg opacity-60 cursor-not-allowed border border-purple-100">
+                            Edit Requested
+                          </button>
+                        ) : (event.quote_status === 'client_submitted' || event.status === 'pending_admin_approval' || event.status === 'sent') ? (
+                          <button 
+                            onClick={() => handleRequestEdit(event.id)}
+                            className="text-xs font-bold text-orange-600 bg-orange-50 px-3 py-2 rounded-lg hover:bg-orange-100 transition border border-orange-100"
+                          >
+                            Request Edit
+                          </button>
+                        ) : (
+                          <Link 
+                            href={`/client-menu/${event.id}`} 
+                            className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition"
+                          >
+                            Edit Selection
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

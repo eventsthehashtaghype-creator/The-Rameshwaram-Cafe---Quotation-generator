@@ -47,7 +47,8 @@ function ClientMenuContent() {
             const { data: eventData } = await supabase.from('events').select('*, clients(*)').eq('id', id).single()
             if (eventData) {
                 setEvent(eventData)
-                if (eventData.quote_status === 'client_submitted' && !isPreview) setSubmitted(true) // Only block if NOT preview
+                const isLocked = ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
+                if (isLocked && !isPreview) setSubmitted(true) // Block editing if already submitted/locked
 
                 // Calculate Days
                 const start = new Date(eventData.event_date)
@@ -82,8 +83,9 @@ function ClientMenuContent() {
             let restoredFromLocal = false
             const localConfig = localStorage.getItem(`menu_config_${id}`)
             const localSels = localStorage.getItem(`menu_sels_${id}`)
+            const isLocked = eventData ? ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status) : false
 
-            if (localConfig && localSels && eventData?.quote_status !== 'client_submitted') {
+            if (localConfig && localSels && !isLocked) {
                 try {
                     setSessionConfig(JSON.parse(localConfig))
                     setMenuSelections(JSON.parse(localSels))
@@ -107,10 +109,10 @@ function ClientMenuContent() {
                 setSessionConfig(newConfig)
                 setMenuSelections(newSelections)
 
-                if (isPreview || eventData?.quote_status === 'client_submitted') {
+                if (isPreview || isLocked) {
                     setStep(4)
                 }
-            } else if (restoredFromLocal && (isPreview || eventData?.quote_status === 'client_submitted')) {
+            } else if (restoredFromLocal && (isPreview || isLocked)) {
                 setStep(4)
             }
 
@@ -437,7 +439,7 @@ function ClientMenuContent() {
 
         await supabase.from('menu_selections').delete().eq('event_id', id)
         const { error } = await supabase.from('menu_selections').insert(payload)
-        await supabase.from('events').update({ quote_status: 'client_submitted' }).eq('id', id)
+        await supabase.from('events').update({ quote_status: 'client_submitted', status: 'pending_admin_approval' }).eq('id', id)
 
         // Clear Cache
         localStorage.removeItem(`menu_config_${id}`)
