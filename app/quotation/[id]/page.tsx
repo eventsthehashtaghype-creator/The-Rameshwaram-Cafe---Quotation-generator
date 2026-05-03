@@ -23,6 +23,7 @@ export default function QuotationPage() {
     const [loading, setLoading] = useState(true)
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'quote')
     const [appSettings, setAppSettings] = useState<any>(null)
+    const isClientPreview = searchParams.get('client_preview') === 'true'
 
     // --- EDITING STATE ---
     const [saving, setSaving] = useState(false)
@@ -70,7 +71,8 @@ export default function QuotationPage() {
         { id: 't3', text: "Transportation charges extra as per actual", selected: true },
         { id: 't4', text: "Staff Travel & Accommodation for staff should be provided by client if booked by us need to be reimbursed.", selected: true },
         { id: 't5', text: "Tables & Chafing dish should be arranged by client", selected: true },
-        { id: 't6', text: "Extra Pax will be charged as per above pricing", selected: true }
+        { id: 't6', text: "Extra Pax will be charged as per above pricing", selected: true },
+        { id: 't7', text: "Service Time 3:30 Hrs Extra Hour Services is Applicable", selected: true }
     ]
     const [terms, setTerms] = useState<{ id: string, text: string, selected: boolean }[]>([])
 
@@ -414,7 +416,14 @@ export default function QuotationPage() {
         doc.setFontSize(10)
         doc.setFont('helvetica', 'bold')
         doc.text(`Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}`, 14, yPos)
-        yPos += 10
+        
+        doc.setFont('helvetica', 'normal')
+        if (event.venue_name || city) {
+            doc.text(`Venue : ${[event.venue_name, city, event.venue_zipcode].filter(Boolean).join(', ')}`, 14, yPos + 6)
+            yPos += 16
+        } else {
+            yPos += 10
+        }
 
         // 3. Render Tables natively using autoTable
         selections.forEach((sel) => {
@@ -813,29 +822,40 @@ export default function QuotationPage() {
     return (
         <div className="min-h-screen bg-gray-100 font-sans text-black pb-20 print:bg-white print:pb-0">
 
-            {/* NAVBAR (Hidden in Print) */}
-            <div className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm">
-                <div className="flex items-center gap-4">
-                    <Link href="/" className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200 transition">←</Link>
-                    <div>
-                        <h1 className="text-xl font-black">{event.event_code}</h1>
-                        <p className="text-xs font-bold text-gray-500 uppercase">{event.clients?.entity_name}</p>
+            {/* NAVBAR */}
+            {!isClientPreview ? (
+                <div className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm">
+                    <div className="flex items-center gap-4">
+                        <Link href="/" className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200 transition">←</Link>
+                        <div>
+                            <h1 className="text-xl font-black">{event.event_code}</h1>
+                            <p className="text-xs font-bold text-gray-500 uppercase">{event.clients?.entity_name}</p>
+                        </div>
+                    </div>
+                    <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                        {['quote', 'settings'].map((tab) => (
+                            <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${activeTab === tab ? 'bg-white shadow-sm text-black' : 'text-gray-400 hover:text-gray-600'}`}>{tab}</button>
+                        ))}
+                    </div>
+                    <div className="flex gap-3">
+                        <button onClick={handleDownloadMenuSheet} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-xs font-bold transition flex items-center gap-2">
+                            <span>📄</span> Word
+                        </button>
+                        <button onClick={handleDownloadPDF} className="bg-black text-white px-5 py-2 rounded text-xs font-bold shadow-lg hover:bg-gray-800 transition flex items-center gap-2">
+                            <span>🖨️</span> PDF
+                        </button>
                     </div>
                 </div>
-                <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
-                    {['quote', 'settings'].map((tab) => (
-                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${activeTab === tab ? 'bg-white shadow-sm text-black' : 'text-gray-400 hover:text-gray-600'}`}>{tab}</button>
-                    ))}
-                </div>
-                <div className="flex gap-3">
-                    <button onClick={handleDownloadMenuSheet} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-xs font-bold transition flex items-center gap-2">
-                        <span>📄</span> Word
-                    </button>
-                    <button onClick={handleDownloadPDF} className="bg-black text-white px-5 py-2 rounded text-xs font-bold shadow-lg hover:bg-gray-800 transition flex items-center gap-2">
-                        <span>🖨️</span> PDF
+            ) : (
+                <div className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden shadow-sm">
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-xl font-black text-black">Your Quotation</h1>
+                    </div>
+                    <button onClick={handleDownloadPDF} className="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2">
+                        <span>📥</span> Download PDF
                     </button>
                 </div>
-            </div>
+            )}
 
             <div className="max-w-[210mm] mx-auto my-8 print:my-0 print:max-w-full">
 
@@ -865,9 +885,12 @@ export default function QuotationPage() {
                             </div>
                         </div>
 
-                        {/* EVENT DATES */}
+                        {/* EVENT DATES & VENUE */}
                         <div className="mb-4 text-sm font-bold">
                             <p>Event Date : {new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')} {days > 1 ? 'to ' + new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : ''}</p>
+                            {(event.venue_name || city) && (
+                                <p className="mt-1 font-normal">Venue : {[event.venue_name, city, event.venue_zipcode].filter(Boolean).join(', ')}</p>
+                            )}
                         </div>
 
                         {/* TABLES MAP */}
@@ -963,41 +986,45 @@ export default function QuotationPage() {
                                 <div className="flex items-center justify-between mb-2">
                                     <p className="uppercase font-bold">NOTE:</p>
                                     {/* Action Buttons */}
-                                    <div className="mt-8 flex gap-4">
-                                        <button
-                                            onClick={() => {
-                                                setTerms([...terms, { id: 't' + Date.now(), text: 'New Condition...', selected: true }])
-                                                setHasUnsavedChanges(true)
-                                            }}
-                                            className="bg-gray-100 hover:bg-gray-200 text-black px-6 py-2 rounded text-sm font-bold uppercase tracking-wide transition shadow-sm active:scale-95 border-2 border-dashed border-gray-300"
-                                        >
-                                            + Add Condition
-                                        </button>
-                                        <button
-                                            onClick={handleSaveSettings}
-                                            disabled={saving || !hasUnsavedChanges}
-                                            className="bg-black text-white px-8 py-2 rounded text-sm font-bold uppercase tracking-wide hover:bg-gray-800 transition shadow-lg active:scale-95 disabled:opacity-50"
-                                        >
-                                            {saving ? 'Saving...' : 'Save Terms'}
-                                        </button>
-                                    </div>
+                                    {!isClientPreview && (
+                                        <div className="mt-8 flex gap-4">
+                                            <button
+                                                onClick={() => {
+                                                    setTerms([...terms, { id: 't' + Date.now(), text: 'New Condition...', selected: true }])
+                                                    setHasUnsavedChanges(true)
+                                                }}
+                                                className="bg-gray-100 hover:bg-gray-200 text-black px-6 py-2 rounded text-sm font-bold uppercase tracking-wide transition shadow-sm active:scale-95 border-2 border-dashed border-gray-300"
+                                            >
+                                                + Add Condition
+                                            </button>
+                                            <button
+                                                onClick={handleSaveSettings}
+                                                disabled={saving || !hasUnsavedChanges}
+                                                className="bg-black text-white px-8 py-2 rounded text-sm font-bold uppercase tracking-wide hover:bg-gray-800 transition shadow-lg active:scale-95 disabled:opacity-50"
+                                            >
+                                                {saving ? 'Saving...' : 'Save Terms'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
                                     {terms.map((term, index) => (
-                                        <div key={term.id} className={`flex items-start gap-3 ${!term.selected && 'print:hidden'}`}>
-                                            <div className="pt-1 print:hidden">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={term.selected}
-                                                    onChange={(e) => {
-                                                        const newTerms = [...terms]
-                                                        newTerms[index].selected = e.target.checked
-                                                        setTerms(newTerms)
-                                                        setHasUnsavedChanges(true)
-                                                    }}
-                                                    className="w-4 h-4 text-black rounded border-gray-300 focus:ring-black cursor-pointer"
-                                                />
-                                            </div>
+                                        <div key={term.id} className={`flex items-start gap-3 ${!term.selected && 'print:hidden'} ${(!term.selected && isClientPreview) ? 'hidden' : ''}`}>
+                                            {!isClientPreview && (
+                                                <div className="pt-1 print:hidden">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={term.selected}
+                                                        onChange={(e) => {
+                                                            const newTerms = [...terms]
+                                                            newTerms[index].selected = e.target.checked
+                                                            setTerms(newTerms)
+                                                            setHasUnsavedChanges(true)
+                                                        }}
+                                                        className="w-4 h-4 text-black rounded border-gray-300 focus:ring-black cursor-pointer"
+                                                    />
+                                                </div>
+                                            )}
                                             <div className="flex-1 flex items-start gap-2">
                                                 <span className={`font-medium ${!term.selected ? 'text-gray-400' : ''}`}>
                                                     {index + 1}.
@@ -1110,7 +1137,7 @@ export default function QuotationPage() {
                                             <label className={labelClass}>Event Type</label>
                                             <select className={inputClass} value={eventType} onChange={e => { setEventType(e.target.value as any); setHasUnsavedChanges(true) }}>
                                                 <option value="B2B">B2B (Corporate)</option>
-                                                <option value="B2C">B2C (Private)</option>
+                                                <option value="B2C">B2C</option>
                                             </select>
                                         </div>
                                         <div>

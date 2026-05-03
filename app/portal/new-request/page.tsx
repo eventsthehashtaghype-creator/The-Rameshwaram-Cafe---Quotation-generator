@@ -259,14 +259,10 @@ export default function NewRequestPage() {
                 </div>}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  <div>
-                    <label className={labelClass}>Guest Count (Pax) *</label>
-                    <input type="number" required min="1" value={paxCount} onChange={e => setPaxCount(e.target.value)} className={inputClass} />
-                  </div>
-                  <div>
+                  <div className="md:col-span-2">
                     <label className={labelClass}>Event Type</label>
                     <select value={eventType} onChange={e => setEventType(e.target.value as any)} className={`${inputClass} appearance-none`}>
-                      <option value="B2C">Private / B2C</option>
+                      <option value="B2C">B2C</option>
                       <option value="B2B">Corporate / B2B</option>
                     </select>
                   </div>

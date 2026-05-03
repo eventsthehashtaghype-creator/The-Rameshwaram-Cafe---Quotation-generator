@@ -118,7 +118,7 @@ export default function PortalDashboard() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Event Code</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Provisional Event Code</th>
                   <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Date & Size</th>
                   <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
                   <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Action</th>
@@ -144,34 +144,59 @@ export default function PortalDashboard() {
                       {(event.status === 'edit_requested' || event.quote_status === 'edit_requested') && <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[10px] font-black uppercase rounded tracking-wide border border-purple-100">Edit Requested</span>}
                     </td>
                     <td className="px-6 py-5 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Link 
-                          href={`/client-menu/${event.id}?preview=true`} 
-                          className="text-xs font-bold text-gray-600 bg-gray-50 px-3 py-2 rounded-lg hover:bg-gray-100 transition"
-                        >
-                          View Selection
-                        </Link>
-                        
-                        {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
-                          <button disabled className="text-xs font-bold text-purple-600 bg-purple-50 px-3 py-2 rounded-lg opacity-60 cursor-not-allowed border border-purple-100">
-                            Edit Requested
+                        <div className="relative inline-block text-left group">
+                          <button className="p-2 text-gray-500 hover:text-black hover:bg-gray-100 rounded-full transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
                           </button>
-                        ) : (event.quote_status === 'client_submitted' || event.status === 'pending_admin_approval' || event.status === 'sent') ? (
-                          <button 
-                            onClick={() => handleRequestEdit(event.id)}
-                            className="text-xs font-bold text-orange-600 bg-orange-50 px-3 py-2 rounded-lg hover:bg-orange-100 transition border border-orange-100"
-                          >
-                            Request Edit
-                          </button>
-                        ) : (
-                          <Link 
-                            href={`/client-menu/${event.id}`} 
-                            className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition"
-                          >
-                            Edit Selection
-                          </Link>
-                        )}
-                      </div>
+                          
+                          <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 flex flex-col overflow-hidden">
+                            
+                            <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 border-b border-gray-100">
+                              Menu
+                            </div>
+                            <Link 
+                              href={`/client-menu/${event.id}?preview=true`} 
+                              className="px-4 py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-black transition"
+                            >
+                              📄 View / Download Menu
+                            </Link>
+
+                            {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
+                              <button disabled className="px-4 py-3 text-xs font-bold text-left text-purple-400 bg-purple-50/50 cursor-not-allowed border-t border-gray-100">
+                                ⏳ Edit Requested
+                              </button>
+                            ) : (event.quote_status === 'client_submitted' || event.status === 'pending_admin_approval' || event.status === 'sent') ? (
+                              <button 
+                                onClick={() => handleRequestEdit(event.id)}
+                                className="px-4 py-3 text-xs font-bold text-left text-orange-600 hover:bg-orange-50 transition border-t border-gray-100"
+                              >
+                                ✏️ Request Edit
+                              </button>
+                            ) : (
+                              <Link 
+                                href={`/client-menu/${event.id}`} 
+                                className="px-4 py-3 text-xs font-bold text-blue-600 hover:bg-blue-50 transition border-t border-gray-100"
+                              >
+                                ✏️ Edit Selection
+                              </Link>
+                            )}
+
+                            {/* Quotation Downloads */}
+                            {(event.status === 'sent' || event.status === 'confirmed') && (
+                              <>
+                                <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 border-y border-gray-100">
+                                  Quotation
+                                </div>
+                                <button
+                                  onClick={() => window.open(`/quotation/${event.id}?client_preview=true`, '_blank')}
+                                  className="px-4 py-3 text-xs font-bold text-left text-gray-700 hover:bg-gray-50 hover:text-black transition"
+                                >
+                                  📥 Download Quotation
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
                     </td>
                   </tr>
                 ))}

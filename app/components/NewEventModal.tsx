@@ -318,7 +318,7 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
                         value={eventType}
                         onChange={e => setEventType(e.target.value as 'B2B' | 'B2C')}
                       >
-                        <option value="B2C">Private / B2C</option>
+                        <option value="B2C">B2C</option>
                         <option value="B2B">Corporate / B2B</option>
                       </select>
                     </div>
