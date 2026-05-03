@@ -15,8 +15,12 @@ export default function ResetPasswordPage() {
     setMessage('')
     setErrorMsg('')
 
+    const siteUrl = window.location.origin.includes('localhost') 
+      ? window.location.origin 
+      : 'https://quotation-app-steel-ten.vercel.app';
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/portal/update-password`,
+      redirectTo: `${siteUrl}/portal/update-password`,
     })
 
     if (error) {
