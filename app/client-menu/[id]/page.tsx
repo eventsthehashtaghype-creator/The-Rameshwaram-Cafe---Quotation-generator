@@ -504,7 +504,6 @@ function ClientMenuContent() {
                                         <tr key={cat.id} className="hover:bg-gray-50 transition group">
                                             <td className="p-6 font-bold text-xl text-gray-800 border-b border-gray-100 group-last:border-0">
                                                 {cat.title}
-                                                <div className="text-xs font-normal text-gray-400 mt-1">Starting at ₹{cat.title.toUpperCase() === 'BANANA LEAF MEAL' ? '1800' : '1000'}</div>
                                             </td>
                                             {eventDays.map((_, dayIndex) => {
                                                 const key = getSessionKey(dayIndex, cat.id)
@@ -558,7 +557,6 @@ function ClientMenuContent() {
                                                 <div key={cat.id} className="p-4 flex items-center justify-between">
                                                     <div>
                                                         <div className="font-bold text-gray-800">{cat.title}</div>
-                                                        <div className="text-xs text-gray-400">Starts at ₹{cat.title.toUpperCase() === 'BANANA LEAF MEAL' ? '1800' : '1000'} / plate</div>
                                                     </div>
 
                                                     {isEnabled ? (
@@ -630,7 +628,6 @@ function ClientMenuContent() {
                                         </div>
                                         <h3 className="text-2xl font-black text-gray-900 mb-1 group-hover:text-gray-600 transition-colors">{cat?.title}</h3>
                                         <p className="text-sm font-bold text-gray-500 mb-2">{eventDays[dayIndex]}</p>
-                                        <p className="text-xs font-bold text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded">₹ {currentPrice} / plate</p>
 
                                         <div className="mt-8 flex justify-between items-end">
                                             <div className="text-gray-900">
@@ -754,7 +751,6 @@ function ClientMenuContent() {
                                                             <div className="md:w-1/4 pt-1">
                                                                 <h4 className="font-black text-xl uppercase text-gray-900 leading-none mb-2">{cat?.title}</h4>
                                                                 <p className="text-sm font-bold text-gray-400 uppercase tracking-wide">{currentPax} Guests</p>
-                                                                <p className="text-xs font-bold text-amber-600 mt-2">₹ {currentPrice} / plate</p>
                                                             </div>
 
                                                             <div className="flex-1">
@@ -782,11 +778,7 @@ function ClientMenuContent() {
 
                         {!isPreview && (
                             <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-gray-200 z-50 bg-opacity-95 backdrop-blur shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-                                <div className="max-w-5xl mx-auto flex justify-between items-center">
-                                    <div>
-                                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Estimate</p>
-                                        <h3 className="text-3xl font-black text-gray-900">₹ {calculateTotal().toLocaleString()}</h3>
-                                    </div>
+                                <div className="max-w-5xl mx-auto flex justify-end items-center">
                                     <button
                                         onClick={handleSubmit}
                                         disabled={submitting}
@@ -824,14 +816,10 @@ function Header({ event }: { event: any }) {
     )
 }
 
-function StepFooter({ total, onNext, nextLabel, disabled }: any) {
+function StepFooter({ onNext, nextLabel, disabled }: any) {
     return (
         <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-gray-200 z-40 bg-opacity-95 backdrop-blur shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-            <div className="max-w-5xl mx-auto flex justify-between items-center">
-                <div>
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Estimated Total</p>
-                    <h3 className="text-3xl font-black text-gray-900">₹ {total.toLocaleString()}</h3>
-                </div>
+            <div className="max-w-5xl mx-auto flex justify-end items-center">
                 <button
                     onClick={onNext}
                     disabled={disabled}
