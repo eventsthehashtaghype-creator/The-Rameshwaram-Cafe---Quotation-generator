@@ -720,7 +720,7 @@ function ClientMenuContent() {
                             </button>
                         )}
 
-                        <div className="bg-white p-10 rounded-2xl shadow-xl border border-gray-200 mb-12 relative overflow-hidden">
+                        <div className="bg-white p-6 md:p-10 rounded-2xl shadow-xl border border-gray-200 mb-12 relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-full h-2 bg-black"></div>
                             <h2 className="text-3xl font-black mb-8 text-center text-gray-900 border-b border-gray-100 pb-8">
                                 {isPreview ? 'Preview of Selected Menu' : 'Review Your Menu'}

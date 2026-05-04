@@ -115,8 +115,9 @@ export default function PortalDashboard() {
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <table className="w-full text-left border-collapse">
-              <thead>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Provisional Event Code</th>
                   <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Date & Size</th>
@@ -202,6 +203,7 @@ export default function PortalDashboard() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </main>

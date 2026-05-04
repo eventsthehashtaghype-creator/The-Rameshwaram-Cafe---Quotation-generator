@@ -857,11 +857,11 @@ export default function QuotationPage() {
                 </div>
             )}
 
-            <div className="max-w-[210mm] mx-auto my-8 print:my-0 print:max-w-full">
+            <div className="max-w-[210mm] mx-auto my-4 md:my-8 overflow-x-auto print:overflow-visible print:my-0 print:max-w-full">
 
                 {/* === QUOTE TAB === */}
                 {activeTab === 'quote' && (
-                    <div className="bg-white shadow-lg print:shadow-none min-h-[297mm] flex flex-col relative text-black text-sm p-8 md:p-16 font-bold">
+                    <div className="bg-white shadow-lg print:shadow-none min-h-[297mm] min-w-[700px] print:min-w-0 flex flex-col relative text-black text-sm p-8 md:p-16 font-bold">
 
                         {/* LOGO AREA */}
                         <div className="text-center mb-8 flex flex-col items-center">
