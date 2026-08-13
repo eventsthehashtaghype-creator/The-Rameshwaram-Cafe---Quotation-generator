@@ -3,12 +3,15 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/app/lib/supabase'
 import AppSidebar from '../components/AppSidebar'
 
+import { useRouter } from 'next/navigation'
+
 // --- TYPES ---
 type Item = { id: string; name: string; station_id: string }
 type Station = { id: string; name: string; selection_type: string; items: Item[]; category_id: string }
 type Category = { id: string; title: string; default_price: number; stations: Station[] }
 
 export default function MenuManager() {
+    const router = useRouter()
     const [categories, setCategories] = useState<Category[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -20,6 +23,20 @@ export default function MenuManager() {
     // --- FETCH DATA ---
     async function fetchMenu() {
         setLoading(true)
+
+        // Auth & Role check
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+            router.push('/login')
+            return
+        }
+        
+        const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+        if (clientUser) {
+            router.replace('/portal/dashboard')
+            return
+        }
+
         const { data: cats } = await supabase.from('menu_categories').select('*').order('sort_order', { ascending: true })
         const { data: stations } = await supabase.from('menu_stations').select('*').order('sort_order', { ascending: true })
         const { data: items } = await supabase.from('menu_items').select('*').order('name', { ascending: true })

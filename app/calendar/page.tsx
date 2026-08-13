@@ -1,10 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/app/lib/supabase'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AppSidebar from '@/app/components/AppSidebar'
 
 export default function CalendarPage() {
+    const router = useRouter()
     const [events, setEvents] = useState<any[]>([])
     const [currentDate, setCurrentDate] = useState(new Date())
     const [selectedDayOverflow, setSelectedDayOverflow] = useState<{ day: number, events: any[] } | null>(null)
@@ -12,6 +14,18 @@ export default function CalendarPage() {
     useEffect(() => { fetchEvents() }, [])
 
     async function fetchEvents() {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+            router.push('/login')
+            return
+        }
+        
+        const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+        if (clientUser) {
+            router.replace('/portal/dashboard')
+            return
+        }
+
         const { data } = await supabase.from('events').select('*, client:clients(entity_name)')
         if (data) setEvents(data.filter((e: any) => e.status !== 'cancelled'))
     }

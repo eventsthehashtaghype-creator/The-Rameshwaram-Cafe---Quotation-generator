@@ -2,17 +2,35 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/app/lib/supabase'
 import { Client } from '@/app/types'
+import { useRouter } from 'next/navigation'
 import AppSidebar from '@/app/components/AppSidebar'
 import { INDIAN_STATES } from '@/app/lib/locations'
 
 export default function ClientManagerPage() {
+  const router = useRouter()
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [editingClient, setEditingClient] = useState<Client | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => { fetchClients() }, [])
-  async function fetchClients() { const { data } = await supabase.from('clients').select('*').order('entity_name'); if (data) setClients(data as any); setLoading(false) }
+  async function fetchClients() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      router.push('/login')
+      return
+    }
+    
+    const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+    if (clientUser) {
+      router.replace('/portal/dashboard')
+      return
+    }
+
+    const { data } = await supabase.from('clients').select('*').order('entity_name'); 
+    if (data) setClients(data as any); 
+    setLoading(false) 
+  }
   async function updateClient() {
     if (!editingClient) return;
     if (!editingClient.contact_person || editingClient.contact_person.trim() === '') {

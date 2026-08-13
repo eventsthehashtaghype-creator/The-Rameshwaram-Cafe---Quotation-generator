@@ -74,6 +74,12 @@ export default function SettingsPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
         setSessionToken(session.access_token)
+        // Role Check
+        const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+        if (clientUser) {
+          router.replace('/portal/dashboard')
+          return
+        }
       } else {
         router.push('/login')
         return

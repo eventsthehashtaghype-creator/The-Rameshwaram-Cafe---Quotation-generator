@@ -10,9 +10,15 @@ export default function AppSidebar() {
   const [isOpen, setIsOpen] = useState(false)
 
   const [profile, setProfile] = useState<any>(null)
+  const [adminLoginName, setAdminLoginName] = useState<string>('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('admin_login_name')
+      if (saved) setAdminLoginName(saved)
+    }
+
     async function fetchUserAccess() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -54,7 +60,8 @@ export default function AppSidebar() {
 
   const perms = profile?.permissions || {}
   const activeRoleBadge = perms.settings ? 'Admin Access' : 'Staff Access'
-  const initials = profile?.full_name ? profile.full_name.substring(0, 2).toUpperCase() : 'US'
+  const displayName = adminLoginName ? `${adminLoginName} (${profile?.full_name || 'Admin'})` : (profile?.full_name || 'Admin')
+  const initials = adminLoginName ? adminLoginName.substring(0, 2).toUpperCase() : (profile?.full_name ? profile.full_name.substring(0, 2).toUpperCase() : 'AD')
 
   const NavContent = () => (
     <>
@@ -101,6 +108,9 @@ export default function AppSidebar() {
               <span>👥</span> Clients
             </Link>
           )}
+          <Link href="/logs" onClick={() => setIsOpen(false)} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold text-sm ${isActive('/logs')}`}>
+            <span>📋</span> Activity Logs
+          </Link>
         </div>
 
         <div>
@@ -122,7 +132,7 @@ export default function AppSidebar() {
               {initials}
             </div>
             <div>
-              <p className="text-xs font-bold text-white max-w-[120px] truncate">{profile?.full_name}</p>
+              <p className="text-xs font-bold text-white max-w-[120px] truncate">{displayName}</p>
               <p className="text-[10px] text-gray-400">{activeRoleBadge}</p>
             </div>
           </div>

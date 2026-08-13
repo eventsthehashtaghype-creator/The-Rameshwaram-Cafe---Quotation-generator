@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/app/lib/supabase'
+import { logActivity } from '@/app/lib/audit'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { jsPDF } from 'jspdf'
@@ -24,6 +25,12 @@ export default function QuotationPage() {
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'quote')
     const [appSettings, setAppSettings] = useState<any>(null)
     const isClientPreview = searchParams.get('client_preview') === 'true'
+
+    // --- LOCK & EDIT WORKFLOW STATE ---
+    const [isQuoteLocked, setIsQuoteLocked] = useState(false)
+    const [isMenuLocked, setIsMenuLocked] = useState(false)
+    const [showEditReasonModal, setShowEditReasonModal] = useState(false)
+    const [editReason, setEditReason] = useState('')
 
     // --- EDITING STATE ---
     const [saving, setSaving] = useState(false)
@@ -109,6 +116,15 @@ export default function QuotationPage() {
     async function fetchData() {
         console.log("fetchData started...")
         try {
+            // Auth & Security Check
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) {
+                router.push('/login')
+                return
+            }
+
+            const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+
             // 1. Fetch Event & Global Settings
             const { data: eventData, error: eventError } = await supabase.from('events').select(`*, clients(*)`).eq('id', id).single()
             const { data: settingsData } = await supabase.from('app_settings').select('*').single()
@@ -122,6 +138,18 @@ export default function QuotationPage() {
                 alert("Error loading event: " + eventError.message)
                 setLoading(false)
                 return
+            }
+
+            // Security: If client, verify ownership and force preview mode
+            if (clientUser) {
+                if (eventData.client_id !== clientUser.id) {
+                    router.replace('/portal/dashboard')
+                    return
+                }
+                if (!isClientPreview) {
+                    router.replace(`/quotation/${id}?client_preview=true`)
+                    return
+                }
             }
 
             if (eventData) {
@@ -143,6 +171,11 @@ export default function QuotationPage() {
                 setPocName(eventData.poc_name || '')
                 setPocMobile(eventData.poc_mobile || '')
                 setPocEmail(eventData.poc_email || '')
+
+                // Lock States
+                const isLocked = eventData.status === 'sent' || eventData.quote_status === 'submitted' || eventData.quote_status === 'sent' || eventData.quote_submitted === true
+                setIsQuoteLocked(isLocked)
+                setIsMenuLocked(eventData.menu_locked === true)
 
                 // Init terms state gracefully from DB or Defaults
                 if (eventData.terms_and_conditions && Array.isArray(eventData.terms_and_conditions)) {
@@ -448,9 +481,12 @@ export default function QuotationPage() {
                         { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: 0, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
                     ])
                 } else {
+                    contentBody.push([
+                        { content: 'CUSTOM REQUESTS', styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 4, right: 4 }, fontSize: 10, halign: 'left', lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
+                    ])
                     const itemsStr = items.join('\n')
                     contentBody.push([
-                        { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 4, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
+                        { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: 0, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
                     ])
                 }
             })
@@ -460,14 +496,14 @@ export default function QuotationPage() {
                 lastRowStyles.lineWidth.bottom = 0.1;
 
                 contentBody[0].push({
-                    content: `Rs. ${sel.price_per_plate} /-`,
+                    content: `Rs. ${((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')} /-`,
                     rowSpan: contentBody.length,
                     styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] }
                 })
             } else {
                 contentBody.push([
                     { content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: 4, lineWidth: { top: 0, right: 0, bottom: 0.1, left: 0 }, lineColor: [0, 0, 0] } },
-                    { content: `Rs. ${sel.price_per_plate} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] } }
+                    { content: `Rs. ${((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] } }
                 ])
             }
 
@@ -573,6 +609,51 @@ export default function QuotationPage() {
             columnStyles: {
                 0: { cellWidth: 40, halign: 'left' },
                 1: { cellWidth: 50, halign: 'left', fontStyle: 'bold' } // Uppercase already applied in strings
+            },
+            margin: { left: 14 },
+            didDrawPage: (data) => {
+                yPos = data.cursor ? data.cursor.y : yPos
+            }
+        })
+
+        if (yPos > doc.internal.pageSize.getHeight() - 60) {
+            doc.addPage()
+            yPos = 20
+        }
+        yPos += 10
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(65, 122, 185)
+        doc.text('Annexure C - Event Timings & Extension Charges', 14, yPos)
+        doc.setTextColor(0, 0, 0)
+
+        autoTable(doc, {
+            startY: yPos + 3,
+            head: [['Meal Type', 'Timings', 'Extension Charges (Rs/Hour)']],
+            body: [
+                ['Breakfast', '7:00 AM - 11:00 AM', '50,000'],
+                ['Lunch', '12:00 PM - 3:00 PM', '50,000'],
+                ['High Tea', '4:00 PM - 7:00 PM', '50,000'],
+                ['Dinner', '7:00 PM - 11:00 PM', '50,000']
+            ],
+            theme: 'grid',
+            styles: {
+                font: 'helvetica',
+                fontSize: 10,
+                textColor: [0, 0, 0],
+                lineColor: [0, 0, 0],
+                lineWidth: 0.1,
+                halign: 'left'
+            },
+            headStyles: {
+                fillColor: [255, 255, 255],
+                textColor: [0, 0, 0],
+                fontStyle: 'bold'
+            },
+            columnStyles: {
+                0: { cellWidth: 50 },
+                1: { cellWidth: 60 },
+                2: { cellWidth: 50 }
             },
             margin: { left: 14 },
             didDrawPage: (data) => {
@@ -724,7 +805,7 @@ export default function QuotationPage() {
                                 new TableCell({
                                     width: { size: 2250, type: WidthType.DXA },
                                     margins: { left: 100, right: 100, top: 200, bottom: 100 },
-                                    children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Rs. ${sel.price_per_plate} /-`, bold: true })] })]
+                                    children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Rs. ${((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')} /-`, bold: true })] })]
                                 })
                             ]
                         })
@@ -781,6 +862,35 @@ export default function QuotationPage() {
             })
         )
 
+        // 7. Annexure C
+        docChildren.push(
+            new Paragraph({ spacing: { before: 400, after: 100 }, children: [new TextRun({ text: "Annexure C - Event Timings & Extension Charges", bold: true, color: "417ab9" })] })
+        )
+
+        const makeAnnexureRow = (meal: string, timing: string, charges: string, isHeader = false) => {
+            return new TableRow({
+                children: [
+                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: meal, bold: isHeader })] })] }),
+                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: timing, bold: isHeader })] })] }),
+                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: charges, bold: isHeader })] })] }),
+                ]
+            })
+        }
+
+        docChildren.push(
+            new Table({
+                width: { size: 9000, type: WidthType.DXA },
+                columnWidths: [3000, 3000, 3000],
+                rows: [
+                    makeAnnexureRow("Meal Type", "Timings", "Extension Charges (Rs/Hour)", true),
+                    makeAnnexureRow("Breakfast", "7:00 AM - 11:00 AM", "50,000"),
+                    makeAnnexureRow("Lunch", "12:00 PM - 3:00 PM", "50,000"),
+                    makeAnnexureRow("High Tea", "4:00 PM - 7:00 PM", "50,000"),
+                    makeAnnexureRow("Dinner", "7:00 PM - 11:00 PM", "50,000")
+                ]
+            })
+        )
+
         // Generate and Download
         const docx = new Document({
             styles: {
@@ -804,6 +914,85 @@ export default function QuotationPage() {
         })
     }
 
+    const handleSubmitToClient = async () => {
+        const confirmed = window.confirm("Submit quotation to client? Once submitted, the quotation will be LOCKED TO EDIT for admin until unlocked.")
+        if (!confirmed) return
+
+        const adminName = (typeof window !== 'undefined' && localStorage.getItem('admin_login_name')) || 'Admin'
+        const districtState = [city, state].filter(Boolean).join(', ') || 'Karnataka'
+
+        await supabase.from('events').update({
+            status: 'sent',
+            quote_status: 'sent',
+            quote_submitted: true,
+        }).eq('id', id)
+
+        setIsQuoteLocked(true)
+
+        logActivity({
+            actorName: adminName,
+            clientName: clientName || 'Client',
+            action: 'Submitted Quote',
+            districtState,
+            eventStartDate: startDate,
+            eventCode: event.event_code || 'EVENT',
+            details: 'Quotation submitted to client and locked to edit.'
+        })
+
+        alert("✅ Quotation submitted to client and locked to edit!")
+        fetchData()
+    }
+
+    const handleUnlockForEdit = async () => {
+        const adminName = (typeof window !== 'undefined' && localStorage.getItem('admin_login_name')) || 'Admin'
+        const districtState = [city, state].filter(Boolean).join(', ') || 'Karnataka'
+
+        await supabase.from('events').update({
+            quote_status: 'draft',
+            quote_submitted: false,
+        }).eq('id', id)
+
+        setIsQuoteLocked(false)
+        setShowEditReasonModal(false)
+
+        logActivity({
+            actorName: adminName,
+            clientName: clientName || 'Client',
+            action: 'Edited Quotation',
+            districtState,
+            eventStartDate: startDate,
+            eventCode: event.event_code || 'EVENT',
+            details: editReason ? `Reason: ${editReason}` : 'Unlocked for editing'
+        })
+
+        alert("🔓 Quotation unlocked for editing.")
+        setEditReason('')
+        fetchData()
+    }
+
+    const handleRefreshMenu = async () => {
+        await fetchData()
+        alert("🔄 Refreshed to update to latest menu selections!")
+    }
+
+    const handleToggleLockMenu = async () => {
+        const nextState = !isMenuLocked
+        await supabase.from('events').update({ menu_locked: nextState }).eq('id', id)
+        setIsMenuLocked(nextState)
+
+        const adminName = (typeof window !== 'undefined' && localStorage.getItem('admin_login_name')) || 'Admin'
+        logActivity({
+            actorName: adminName,
+            clientName: clientName || 'Client',
+            action: nextState ? 'Locked Menu' : 'Unlocked Menu',
+            districtState: [city, state].filter(Boolean).join(', ') || 'Karnataka',
+            eventStartDate: startDate,
+            eventCode: event.event_code || 'EVENT',
+        })
+
+        alert(nextState ? "🔒 Menu locked before auto-lock." : "🔓 Menu unlocked.")
+    }
+
     if (loading) return <div className="min-h-screen flex items-center justify-center font-bold text-stone-400">Loading Quote...</div>
     if (!event) return <div>Event not found</div>
 
@@ -824,7 +1013,7 @@ export default function QuotationPage() {
 
             {/* NAVBAR */}
             {!isClientPreview ? (
-                <div className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm">
+                <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap justify-between items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm gap-3">
                     <div className="flex items-center gap-4">
                         <Link href="/" className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200 transition">←</Link>
                         <div>
@@ -832,16 +1021,37 @@ export default function QuotationPage() {
                             <p className="text-xs font-bold text-gray-500 uppercase">{event.clients?.entity_name}</p>
                         </div>
                     </div>
+
                     <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
                         {['quote', 'settings'].map((tab) => (
-                            <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${activeTab === tab ? 'bg-white shadow-sm text-black' : 'text-gray-400 hover:text-gray-600'}`}>{tab}</button>
+                            <button key={tab} onClick={() => setActiveTab(tab)} className={`px-5 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${activeTab === tab ? 'bg-white shadow-sm text-black' : 'text-gray-400 hover:text-gray-600'}`}>{tab}</button>
                         ))}
                     </div>
-                    <div className="flex gap-3">
-                        <button onClick={handleDownloadMenuSheet} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-xs font-bold transition flex items-center gap-2">
+
+                    <div className="flex flex-wrap items-center gap-2">
+                        {/* Lock / Refresh Controls */}
+                        <button onClick={handleRefreshMenu} className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded text-xs font-bold transition flex items-center gap-1.5" title="Refresh to update to latest Menu">
+                            <span>🔄</span> Refresh Menu
+                        </button>
+
+                        <button onClick={handleToggleLockMenu} className={`px-3 py-2 rounded text-xs font-bold transition flex items-center gap-1.5 ${isMenuLocked ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                            <span>{isMenuLocked ? '🔒' : '🔓'}</span> {isMenuLocked ? 'Menu Locked' : 'Lock Menu'}
+                        </button>
+
+                        {isQuoteLocked ? (
+                            <button onClick={() => setShowEditReasonModal(true)} className="bg-amber-500 text-white hover:bg-amber-600 px-3.5 py-2 rounded text-xs font-bold shadow transition flex items-center gap-1.5">
+                                <span>✏️</span> Edit Quotation
+                            </button>
+                        ) : (
+                            <button onClick={handleSubmitToClient} className="bg-blue-600 text-white hover:bg-blue-700 px-3.5 py-2 rounded text-xs font-bold shadow transition flex items-center gap-1.5">
+                                <span>📤</span> Submit to Client
+                            </button>
+                        )}
+
+                        <button onClick={handleDownloadMenuSheet} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-2 rounded text-xs font-bold transition flex items-center gap-1.5">
                             <span>📄</span> Word
                         </button>
-                        <button onClick={handleDownloadPDF} className="bg-black text-white px-5 py-2 rounded text-xs font-bold shadow-lg hover:bg-gray-800 transition flex items-center gap-2">
+                        <button onClick={handleDownloadPDF} className="bg-black text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-gray-800 transition flex items-center gap-1.5">
                             <span>🖨️</span> PDF
                         </button>
                     </div>
@@ -854,6 +1064,41 @@ export default function QuotationPage() {
                     <button onClick={handleDownloadPDF} className="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2">
                         <span>📥</span> Download PDF
                     </button>
+                </div>
+            )}
+
+            {/* QUOTE LOCKED BANNER FOR ADMIN */}
+            {!isClientPreview && isQuoteLocked && (
+                <div className="max-w-[210mm] mx-auto mt-4 px-4">
+                    <div className="bg-amber-50 border-2 border-amber-300 text-amber-900 px-5 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-2">
+                            <span className="text-base">🔒</span>
+                            <span>Quotation is <strong>LOCKED TO EDIT</strong> (Submitted to Client). Click "Edit Quotation" above if you need to modify details or prices.</span>
+                        </div>
+                        <button onClick={() => setShowEditReasonModal(true)} className="bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-700 transition">
+                            Edit Quotation
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* EDIT REASON MODAL */}
+            {showEditReasonModal && (
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                        <h3 className="text-lg font-black text-gray-900">Edit Quotation</h3>
+                        <p className="text-xs text-gray-500 font-medium">Please enter a reason for unlocking and editing this quotation (optional):</p>
+                        <textarea
+                            value={editReason}
+                            onChange={e => setEditReason(e.target.value)}
+                            placeholder="Reason for edit (e.g. Client requested price/menu update)..."
+                            className="w-full border border-gray-300 p-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-500 h-24"
+                        />
+                        <div className="flex justify-end gap-3 pt-2">
+                            <button onClick={() => setShowEditReasonModal(false)} className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                            <button onClick={handleUnlockForEdit} className="px-5 py-2 text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 rounded-lg shadow">Unlock & Edit</button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -946,10 +1191,12 @@ export default function QuotationPage() {
                                                 <td className="border-r border-black p-4 align-top w-3/4">
                                                     {Object.entries(groupedItems).map(([station, items], sIdx) => (
                                                         <div key={sIdx} className="mb-3 last:mb-0">
-                                                            {station !== 'OTHER' && (
-                                                                <h4 className="font-bold text-amber-700 text-sm uppercase tracking-wider mb-1">{station}</h4>
-                                                            )}
-                                                            <ul className="list-none leading-tight space-y-0.5">
+                                                             {station === 'OTHER' ? (
+                                                                 <h4 className="font-bold text-amber-700 text-sm uppercase tracking-wider mb-1">Custom Requests</h4>
+                                                             ) : (
+                                                                 <h4 className="font-bold text-amber-700 text-sm uppercase tracking-wider mb-1">{station}</h4>
+                                                             )}
+                                                             <ul className="list-none leading-tight space-y-0.5">
                                                                 {items.map((item, i) => (
                                                                     <li key={i}>{item}</li>
                                                                 ))}
@@ -958,17 +1205,26 @@ export default function QuotationPage() {
                                                     ))}
                                                 </td>
                                                 <td className="p-4 align-top text-center font-bold w-1/4 pt-6">
-                                                    <div className="flex flex-col items-center justify-start h-full">
-                                                        <div className="flex items-center">
+                                                    <div className="flex flex-col items-center justify-start h-full gap-2">
+                                                        {/* For Admin: Edit per plate cost */}
+                                                        {!isClientPreview && (
+                                                            <div className="flex items-center justify-center text-xs text-gray-500 print:hidden font-normal w-full">
+                                                                <span className="mr-1">Per Plate: Rs.</span>
+                                                                <input
+                                                                    type="number"
+                                                                    value={sel.price_per_plate}
+                                                                    onChange={(e) => handleUpdateLineItem(sel.id, 'price_per_plate', e.target.value)}
+                                                                    className="w-16 text-center bg-transparent border-b border-gray-300 focus:border-black outline-none font-bold text-black"
+                                                                />
+                                                                <span>/-</span>
+                                                            </div>
+                                                        )}
+                                                        {/* Total Amount (Visible to Client and Print) */}
+                                                        <div className="flex items-center text-base mt-2">
+                                                            <span className="mr-1 text-xs text-gray-600 font-normal">Total:</span>
                                                             <span className="mr-1">Rs.</span>
-                                                            <input
-                                                                type="number"
-                                                                value={sel.price_per_plate}
-                                                                onChange={(e) => handleUpdateLineItem(sel.id, 'price_per_plate', e.target.value)}
-                                                                className="w-16 text-center bg-transparent border-b border-gray-300 focus:border-black outline-none print:hidden font-bold"
-                                                            />
-                                                            <span className="print:inline hidden">{sel.price_per_plate}</span>
-                                                            <span>/-</span>
+                                                            <span className="font-bold">{((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')}</span>
+                                                            <span className="ml-1">/-</span>
                                                         </div>
                                                     </div>
                                                 </td>
@@ -1080,7 +1336,43 @@ export default function QuotationPage() {
                                         </tr>
                                         <tr>
                                             <td className="border border-black p-1 px-4 text-xs text-left">Branch</td>
-                                            <td className="border border-black p-1 px-4 uppercase text-xs">Vasant Vihar</td>
+                                            <td className="border border-black p-1 px-4 uppercase text-xs">{appSettings?.bank_branch || "Vasant Vihar"}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* ANNEXURE C */}
+                            <div className="mt-8">
+                                <p className="mb-2 font-bold text-[#417ab9]">Annexure C - Event Timings & Extension Charges</p>
+                                <table className="border-collapse border border-black text-center text-sm w-[36rem]">
+                                    <thead>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left font-bold w-1/3">Meal Type</td>
+                                            <td className="border border-black p-1 px-4 text-xs font-bold w-1/3">Timings</td>
+                                            <td className="border border-black p-1 px-4 text-xs font-bold w-1/3">Extension Charges (₹/Hour)</td>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">Breakfast</td>
+                                            <td className="border border-black p-1 px-4 text-xs">7:00 AM - 11:00 AM</td>
+                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">Lunch</td>
+                                            <td className="border border-black p-1 px-4 text-xs">12:00 PM - 3:00 PM</td>
+                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">High Tea</td>
+                                            <td className="border border-black p-1 px-4 text-xs">4:00 PM - 7:00 PM</td>
+                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="border border-black p-1 px-4 text-xs text-left">Dinner</td>
+                                            <td className="border border-black p-1 px-4 text-xs">7:00 PM - 11:00 PM</td>
+                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
                                         </tr>
                                     </tbody>
                                 </table>

@@ -4,6 +4,16 @@ import { supabase } from '@/app/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
+const isEventLockedByDate = (eventDateStr: string) => {
+  if (!eventDateStr) return false
+  const eventDate = new Date(eventDateStr)
+  eventDate.setHours(0, 0, 0, 0)
+  const limitDate = new Date(eventDate)
+  limitDate.setDate(limitDate.getDate() - 2)
+  const today = new Date()
+  return today >= limitDate
+}
+
 export default function PortalDashboard() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -114,8 +124,8 @@ export default function PortalDashboard() {
             </Link>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm min-h-[380px]">
+            <div className="overflow-x-auto min-h-[380px]">
               <table className="w-full text-left border-collapse min-w-[600px]">
                 <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
@@ -162,7 +172,11 @@ export default function PortalDashboard() {
                               📄 View / Download Menu
                             </Link>
 
-                            {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
+                             {isEventLockedByDate(event.event_date) ? (
+                              <button disabled className="px-4 py-3 text-xs font-bold text-left text-gray-400 bg-gray-50/50 cursor-not-allowed border-t border-gray-100">
+                                🔒 Editing Locked (within 2 days of event)
+                              </button>
+                            ) : (event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
                               <button disabled className="px-4 py-3 text-xs font-bold text-left text-purple-400 bg-purple-50/50 cursor-not-allowed border-t border-gray-100">
                                 ⏳ Edit Requested
                               </button>
@@ -192,7 +206,7 @@ export default function PortalDashboard() {
                                   onClick={() => window.open(`/quotation/${event.id}?client_preview=true`, '_blank')}
                                   className="px-4 py-3 text-xs font-bold text-left text-gray-700 hover:bg-gray-50 hover:text-black transition"
                                 >
-                                  📥 Download Quotation
+                                  📥 Open Quote
                                 </button>
                               </>
                             )}

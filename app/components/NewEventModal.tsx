@@ -11,6 +11,19 @@ const EventMap = dynamic(() => import('./EventMap'), {
   loading: () => <div className="h-64 bg-gray-200 animate-pulse rounded flex items-center justify-center text-black font-bold">Loading Map...</div>
 })
 
+const RTO_STATE_CODES: Record<string, string> = {
+  "Andhra Pradesh": "AP", "Arunachal Pradesh": "AR", "Assam": "AS", "Bihar": "BR",
+  "Chhattisgarh": "CG", "Goa": "GA", "Gujarat": "GJ", "Haryana": "HR",
+  "Himachal Pradesh": "HP", "Jharkhand": "JH", "Karnataka": "KA", "Kerala": "KL",
+  "Madhya Pradesh": "MP", "Maharashtra": "MH", "Manipur": "MN", "Meghalaya": "ML",
+  "Mizoram": "MZ", "Nagaland": "NL", "Odisha": "OD", "Punjab": "PB",
+  "Rajasthan": "RJ", "Sikkim": "SK", "Tamil Nadu": "TN", "Telangana": "TG",
+  "Tripura": "TR", "Uttar Pradesh": "UP", "Uttarakhand": "UK", "West Bengal": "WB",
+  "Andaman and Nicobar Islands": "AN", "Chandigarh": "CH",
+  "Dadra and Nagar Haveli and Daman and Diu": "DD", "Delhi": "DL",
+  "Jammu and Kashmir": "JK", "Ladakh": "LA", "Lakshadweep": "LD", "Puducherry": "PY"
+};
+
 export default function NewEventModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
   const [loading, setLoading] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
@@ -193,7 +206,7 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
       finalClientId = newC.id
     }
 
-    const stateCode = state ? state.substring(0, 2).toUpperCase() : "KA"
+    const stateCode = state ? (RTO_STATE_CODES[state] || state.substring(0, 2).toUpperCase()) : "KA"
     const d = new Date(startDate)
     const day = String(d.getDate()).padStart(2, '0')
     const month = String(d.getMonth() + 1).padStart(2, '0')
@@ -456,7 +469,7 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
                 </div>
 
                 {/* City & State - Dropdowns */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                   <div>
                     <label className={labelClass}>State</label>
                     <select
@@ -487,6 +500,10 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label className={labelClass}>Zip Code / Pincode</label>
+                    <input type="text" className={inputClass} value={venueZipcode} onChange={e => setVenueZipcode(e.target.value)} placeholder="e.g. 560001" />
+                  </div>
                 </div>
 
                 <div className="mb-6 flex items-center gap-4">
@@ -502,7 +519,6 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
                 <div className="space-y-4 mt-auto">
                   <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text-lg bg-gray-50`} value={venueName} onChange={e => setVenueName(e.target.value)} placeholder="e.g. Shangri-La Hotel" /></div>
                   <div><label className={labelClass}>Full Address</label><textarea className={`${inputClass} h-24 font-medium`} value={fullAddress} onChange={e => setFullAddress(e.target.value)} /></div>
-                  <div><label className={labelClass}>Zip Code / Pincode</label><input type="text" className={inputClass} value={venueZipcode} onChange={e => setVenueZipcode(e.target.value)} placeholder="e.g. 560001" /></div>
                 </div>
               </div>
             </div>

@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/app/lib/supabase'
+import { logActivity } from '@/app/lib/audit'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -24,6 +25,7 @@ function ClientMenuContent() {
     const [submitting, setSubmitting] = useState(false)
     const [submitted, setSubmitted] = useState(false)
     const [allowEdit, setAllowEdit] = useState(false)
+    const [isLockedByDate, setIsLockedByDate] = useState(false)
 
     // DATA STATE
     const [menuData, setMenuData] = useState<MenuCategory[]>([])
@@ -47,7 +49,15 @@ function ClientMenuContent() {
             const { data: eventData } = await supabase.from('events').select('*, clients(*)').eq('id', id).single()
             if (eventData) {
                 setEvent(eventData)
-                const isLocked = ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
+                const eventDate = new Date(eventData.event_date)
+                eventDate.setHours(0, 0, 0, 0)
+                const limitDate = new Date(eventDate)
+                limitDate.setDate(limitDate.getDate() - 2)
+                const today = new Date()
+                const dateLocked = today >= limitDate
+                setIsLockedByDate(dateLocked)
+
+                const isLocked = dateLocked || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
                 if (isLocked && !isPreview) setSubmitted(true) // Block editing if already submitted/locked
 
                 // Calculate Days
@@ -150,6 +160,39 @@ function ClientMenuContent() {
         const key = getSessionKey(dayIndex, catId)
         const num = Math.max(0, parseInt(val) || 0)
         setSessionConfig(prev => ({ ...prev, [key]: num }))
+    }
+
+    const handleAddCustomItem = () => {
+        if (!activeSession) return
+        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+        const input = document.getElementById('custom-item-input') as HTMLInputElement
+        const name = input?.value?.trim()
+        if (!name) return
+
+        setMenuSelections(prev => {
+            const current = prev[key] || []
+            if (current.includes(name)) {
+                alert("This item is already added/selected.")
+                return prev
+            }
+            return {
+                ...prev,
+                [key]: [...current, name]
+            }
+        })
+        if (input) input.value = ''
+    }
+
+    const removeCustomItem = (name: string) => {
+        if (!activeSession) return
+        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+        setMenuSelections(prev => {
+            const current = prev[key] || []
+            return {
+                ...prev,
+                [key]: current.filter(i => i !== name)
+            }
+        })
     }
 
     const toggleMenuItem = (item: string, station?: any) => {
@@ -441,6 +484,209 @@ function ClientMenuContent() {
         const { error } = await supabase.from('menu_selections').insert(payload)
         await supabase.from('events').update({ quote_status: 'client_submitted', status: 'pending_admin_approval' }).eq('id', id)
 
+        // Log Activity
+        if (event) {
+            const clientName = event.clients?.entity_name || event.clients?.contact_person || 'Client'
+            logActivity({
+                actorName: clientName,
+                clientName: clientName,
+                action: 'Changed Menu',
+                districtState: [event.city, event.state].filter(Boolean).join(', ') || 'Karnataka',
+                eventStartDate: event.event_date,
+                eventCode: event.event_code || 'EVENT',
+            })
+        }
+
+        // Generate PDF in memory for email attachment
+        let pdfBase64 = ''
+        try {
+            const doc = new jsPDF()
+            let yPos = 20
+
+            // 1. Logo
+            try {
+                const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+                const response = await fetch(`${currentOrigin}/logo.png`)
+                if (response.ok) {
+                    const blob = await response.blob()
+                    const base64Logo = await new Promise<string>((resolve, reject) => {
+                        const img = new Image()
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas')
+                            const MAX_WIDTH = 400
+                            let width = img.width
+                            let height = img.height
+                            if (width > MAX_WIDTH) {
+                                height = Math.round((height * MAX_WIDTH) / width)
+                                width = MAX_WIDTH
+                            }
+                            canvas.width = width
+                            canvas.height = height
+                            const ctx = canvas.getContext('2d')
+                            if (ctx) {
+                                ctx.fillStyle = '#FFFFFF'
+                                ctx.fillRect(0, 0, width, height)
+                                ctx.drawImage(img, 0, 0, width, height)
+                                resolve(canvas.toDataURL('image/jpeg', 0.8))
+                            } else {
+                                resolve('')
+                            }
+                        }
+                        img.onerror = reject
+                        img.src = URL.createObjectURL(blob)
+                    })
+
+                    if (base64Logo) {
+                        const reqWidth = 60
+                        const imgProps = doc.getImageProperties(base64Logo)
+                        const ratio = imgProps.height / imgProps.width
+                        const reqHeight = reqWidth * ratio
+                        const pageWidth = doc.internal.pageSize.getWidth()
+                        doc.addImage(base64Logo, 'JPEG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
+                        yPos += reqHeight + 15
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load logo for confirmation PDF", e)
+            }
+
+            // 2. Header
+            const curDate = new Date().toLocaleDateString('en-GB').replace(/ /g, '-')
+            const eventDateStr = new Date(event.event_date).toLocaleDateString('en-GB')
+            const clientDisplayName = event.clients?.entity_name || event.clients?.contact_person || 'Client'
+
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'normal')
+            doc.text('To,', 14, yPos)
+            doc.setFont('helvetica', 'bold')
+            doc.text(clientDisplayName, 22, yPos + 6)
+            doc.setFont('helvetica', 'normal')
+            doc.text(`Date: ${curDate}`, doc.internal.pageSize.getWidth() - 14, yPos, { align: 'right' })
+
+            yPos += 15
+            doc.setFontSize(14)
+            doc.setFont('helvetica', 'bold')
+            doc.text('CONFIRMED MENU SELECTION', doc.internal.pageSize.getWidth() / 2, yPos, { align: 'center' })
+
+            yPos += 15
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.text(`Event Date : ${eventDateStr}`, 14, yPos)
+            yPos += 10
+
+            // Build item to station map
+            const itemStationMap: Record<string, string> = {}
+            menuData.forEach(cat => {
+                cat.stations?.forEach((st: any) => {
+                    st.items?.forEach((it: any) => {
+                        itemStationMap[it.name] = st.name
+                    })
+                })
+            })
+
+            // 3. Render Tables
+            eventDays.forEach((dayLabel, dayIndex) => {
+                const daySessions = Object.keys(sessionConfig).filter(k => k.startsWith(`${dayIndex}_`))
+                if (daySessions.length === 0) return
+
+                daySessions.forEach(key => {
+                    const catId = key.split('_')[1]
+                    const cat = menuData.find(c => c.id === catId)
+                    const pax = sessionConfig[key]
+                    const items = menuSelections[key] || []
+
+                    if (!cat) return
+
+                    const groupedItems: Record<string, string[]> = {}
+                    items.forEach((item: string) => {
+                        const station = itemStationMap[item] || 'OTHER'
+                        if (!groupedItems[station]) groupedItems[station] = []
+                        groupedItems[station].push(item)
+                    })
+
+                    let contentBody: any[] = []
+
+                    if (items.length === 0) {
+                        contentBody.push([{ content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: { top: 6, bottom: 6, left: 40 } } }])
+                    } else {
+                        contentBody.push([{ content: '', styles: { cellPadding: 2 } }])
+
+                        Object.entries(groupedItems).forEach(([station, items]) => {
+                            if (station !== 'OTHER') {
+                                contentBody.push([{ content: station.toUpperCase(), styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 40 }, fontSize: 11, halign: 'left' } }])
+                            } else {
+                                contentBody.push([{ content: 'CUSTOM REQUESTS', styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 40 }, fontSize: 11, halign: 'left' } }])
+                            }
+                            const itemsStr = items.join('\n')
+                            contentBody.push([{ content: itemsStr, styles: { fontStyle: 'bold', cellPadding: { top: 1, bottom: 6, left: 40 }, halign: 'left', fontSize: 10 } }])
+                        })
+
+                        contentBody.push([{ content: '', styles: { cellPadding: 2 } }])
+                    }
+
+                    if (yPos > doc.internal.pageSize.getHeight() - 40) {
+                        doc.addPage()
+                        yPos = 20
+                    }
+
+                    autoTable(doc, {
+                        startY: yPos + 2,
+                        head: [[`DAY ${dayIndex + 1} - ${dayLabel} - ${cat.title} (${pax} PAX)`]],
+                        body: contentBody,
+                        theme: 'plain',
+                        tableLineColor: [0, 0, 0],
+                        tableLineWidth: 0.1,
+                        styles: {
+                            font: 'helvetica',
+                            fontSize: 10,
+                            textColor: [0, 0, 0],
+                        },
+                        headStyles: {
+                            fillColor: [255, 255, 255],
+                            textColor: [0, 0, 0],
+                            fontStyle: 'bold',
+                            halign: 'left',
+                            valign: 'middle',
+                            cellPadding: 4,
+                            lineWidth: 0.1,
+                            lineColor: [0, 0, 0]
+                        },
+                        bodyStyles: {
+                            halign: 'left',
+                            valign: 'top',
+                        },
+                        columnStyles: {
+                            0: { cellWidth: 'auto' }
+                        },
+                        margin: { left: 14, right: 14 },
+                        didDrawPage: (data) => {
+                            yPos = data.cursor ? data.cursor.y : yPos
+                        }
+                    })
+
+                    yPos += 8
+                })
+            })
+
+            const dataUri = doc.output('datauristring')
+            pdfBase64 = dataUri.split(',')[1]
+        } catch (e) {
+            console.error("Error generating PDF in memory:", e)
+        }
+
+        // Call email API
+        if (pdfBase64) {
+            try {
+                await fetch('/api/send-menu-confirmation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ eventId: id, pdfBase64 })
+                })
+            } catch (e) {
+                console.error("Error calling confirmation email API:", e)
+            }
+        }
+
         // Clear Cache
         localStorage.removeItem(`menu_config_${id}`)
         localStorage.removeItem(`menu_sels_${id}`)
@@ -470,7 +716,7 @@ function ClientMenuContent() {
         )
     }
 
-    if (submitted && !isPreview && !allowEdit) return <SuccessScreen onEdit={() => setAllowEdit(true)} eventId={id as string} />
+    if (submitted && !isPreview && !allowEdit) return <SuccessScreen onEdit={() => setAllowEdit(true)} eventId={id as string} isLockedByDate={isLockedByDate} />
     if (loading || !event) return <div className="h-screen flex items-center justify-center font-bold text-gray-400">Loading Planner...</div>
 
     return (
@@ -675,7 +921,7 @@ function ClientMenuContent() {
                                                 >
                                                     <div className="flex items-center gap-3">
                                                         <h3 className="font-black text-lg md:text-xl text-gray-900">{station.name}</h3>
-                                                        <span className="text-[9px] font-black bg-gray-200 text-gray-600 px-2 py-1 rounded tracking-wider uppercase hidden sm:inline-block">{station.selection_type}</span>
+                                                        <span className="text-[9px] font-black bg-gray-200 text-gray-600 px-2 py-1 rounded tracking-wider uppercase inline-block">{station.selection_type}</span>
                                                     </div>
                                                     <div className={`transform transition-transform text-gray-400 font-bold ${isExpanded ? 'rotate-180' : ''}`}>▼</div>
                                                 </div>
@@ -705,6 +951,70 @@ function ClientMenuContent() {
                                             </div>
                                         )
                                     })}
+
+                                    {/* Pseudo-station for custom items */}
+                                    {(() => {
+                                        const activeCategory = menuData.find(c => c.id === activeSession.categoryId)
+                                        const dbItemNames = new Set(activeCategory?.stations.flatMap((s: any) => s.items.map((i: any) => i.name)) || [])
+                                        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+                                        const selectedItems = menuSelections[key] || []
+                                        const categoryCustomItems = selectedItems.filter(name => !dbItemNames.has(name))
+
+                                        return (
+                                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-4">
+                                                <div className="p-4 bg-gray-50/50 border-b border-gray-200 flex justify-between items-center">
+                                                    <div className="flex items-center gap-3">
+                                                        <h3 className="font-black text-lg text-gray-900">Custom Items / Special Requests</h3>
+                                                    </div>
+                                                </div>
+                                                <div className="p-4 bg-white space-y-4">
+                                                    {categoryCustomItems.length > 0 ? (
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                            {categoryCustomItems.map((item) => (
+                                                                <div
+                                                                    key={item}
+                                                                    className="p-3 md:p-4 rounded-lg border-2 cursor-default flex items-center justify-between bg-black text-white border-black shadow-lg"
+                                                                >
+                                                                    <span className="font-bold text-sm leading-tight text-white">{item}</span>
+                                                                    <button 
+                                                                        type="button"
+                                                                        onClick={() => removeCustomItem(item)}
+                                                                        className="text-red-400 hover:text-red-600 font-bold text-xs cursor-pointer tracking-wider uppercase ml-2 bg-transparent border-0"
+                                                                    >
+                                                                        Remove
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-gray-400 font-medium italic">No custom items requested yet.</p>
+                                                    )}
+                                                    
+                                                    <div className="pt-2 border-t border-gray-100 flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Type custom item name (e.g., Organic Guava Juice)..."
+                                                            className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-black transition"
+                                                            id="custom-item-input"
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    handleAddCustomItem();
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleAddCustomItem}
+                                                            className="bg-black text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-800 transition active:scale-95 shadow-sm uppercase tracking-wider"
+                                                        >
+                                                            + Add
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })()}
                                 </div>
                             </div>
                         </div>
@@ -834,19 +1144,28 @@ function StepFooter({ onNext, nextLabel, disabled }: any) {
     )
 }
 
-function SuccessScreen({ onEdit, eventId }: { onEdit: () => void, eventId: string }) {
+function SuccessScreen({ onEdit, eventId, isLockedByDate }: { onEdit: () => void, eventId: string, isLockedByDate: boolean }) {
     return (
         <div className="h-screen flex flex-col items-center justify-center bg-black text-white p-10 text-center font-sans">
             <div className="text-6xl mb-6">🎉</div>
             <h1 className="text-4xl font-black mb-3">Menu Confirmed!</h1>
             <p className="text-gray-400 text-lg max-w-md mb-8">Your selections have been sent to our team. We will review and provide the final quotation shortly.</p>
             <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
-                <button
-                    onClick={onEdit}
-                    className="bg-white text-black px-8 py-3 rounded-full text-xs font-bold shadow-lg hover:bg-gray-200 transition-colors uppercase tracking-widest whitespace-nowrap"
-                >
-                    Edit Menu
-                </button>
+                {isLockedByDate ? (
+                    <button
+                        disabled
+                        className="bg-gray-800 text-gray-500 border border-gray-700 px-8 py-3 rounded-full text-xs font-bold shadow-lg cursor-not-allowed uppercase tracking-widest whitespace-nowrap"
+                    >
+                        🔒 Editing Locked
+                    </button>
+                ) : (
+                    <button
+                        onClick={onEdit}
+                        className="bg-white text-black px-8 py-3 rounded-full text-xs font-bold shadow-lg hover:bg-gray-200 transition-colors uppercase tracking-widest whitespace-nowrap"
+                    >
+                        Edit Menu
+                    </button>
+                )}
                 <a
                     href={`/client-menu/${eventId}?preview=true&print=true`}
                     target="_blank"

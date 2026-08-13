@@ -1,8 +1,11 @@
 'use client'
 import AppSidebar from '@/app/components/AppSidebar'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/app/lib/supabase'
 
 export default function GettingStartedPage() {
+    const router = useRouter()
     const [activeSection, setActiveSection] = useState('welcome')
 
     const sections = [
@@ -16,6 +19,21 @@ export default function GettingStartedPage() {
         { id: 'calendar', title: '8. Calendar', icon: '📅' },
         { id: 'settings', title: '9. Settings & Roles', icon: '⚙️' },
     ]
+
+    useEffect(() => {
+        async function checkRole() {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) {
+                router.push('/login')
+                return
+            }
+            const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+            if (clientUser) {
+                router.replace('/portal/dashboard')
+            }
+        }
+        checkRole()
+    }, [])
 
     // Intersection Observer to highlight active sidebar link based on scroll
     useEffect(() => {

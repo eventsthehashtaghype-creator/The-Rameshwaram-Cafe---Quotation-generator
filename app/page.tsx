@@ -4,6 +4,9 @@ import { supabase } from '@/app/lib/supabase'
 import AppSidebar from './components/AppSidebar'
 import NewEventModal from './components/NewEventModal'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+
+import { logActivity } from '@/app/lib/audit'
 
 export default function Dashboard() {
   const [events, setEvents] = useState([])
@@ -20,9 +23,25 @@ export default function Dashboard() {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  const router = useRouter()
+
   // --- LOGIC ---
   async function fetchEvents() {
     setLoading(true)
+    
+    // Auth & Role check
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      router.push('/login')
+      return
+    }
+    
+    const { data: clientUser } = await supabase.from('clients').select('id').eq('auth_user_id', session.user.id).single()
+    if (clientUser) {
+      router.replace('/portal/dashboard')
+      return
+    }
+
     const { data } = await supabase.from('events').select(`*, clients(entity_name, contact_person)`).order('created_at', { ascending: false })
     if (data) { setEvents(data as any); calculateStats(data) }
     setLoading(false)
@@ -40,8 +59,27 @@ export default function Dashboard() {
 
   const handleStatusChange = async (id: string, newStatus: string) => {
     setActiveMenuId(null)
-    if (newStatus === 'cancelled' && !window.confirm("Are you sure?")) return
+    if (newStatus === 'cancelled' && !window.confirm("Are you sure you want to reject/cancel this event?")) return
     await supabase.from('events').update({ status: newStatus }).eq('id', id)
+    
+    // Audit Logging
+    const target = (events as any[]).find(e => e.id === id)
+    if (target) {
+      const adminName = (typeof window !== 'undefined' && localStorage.getItem('admin_login_name')) || 'Admin'
+      const clientEntity = target.clients?.entity_name || 'Client'
+      const actionTitle = newStatus === 'confirmed' ? 'Event Accepted' : (newStatus === 'cancelled' ? 'Event Rejected' : `Status: ${newStatus}`)
+      const districtState = [target.city, target.state].filter(Boolean).join(', ') || 'Karnataka'
+      
+      logActivity({
+        actorName: adminName,
+        clientName: clientEntity,
+        action: actionTitle,
+        districtState,
+        eventStartDate: target.event_date,
+        eventCode: target.event_code || 'EVENT',
+      })
+    }
+
     fetchEvents()
   }
 
@@ -50,6 +88,20 @@ export default function Dashboard() {
     const confirmed = window.confirm("Approve edit request? The client will be able to edit their menu again.")
     if (!confirmed) return
     await supabase.from('events').update({ status: 'draft', quote_status: 'draft' }).eq('id', id)
+
+    const target = (events as any[]).find(e => e.id === id)
+    if (target) {
+      const adminName = (typeof window !== 'undefined' && localStorage.getItem('admin_login_name')) || 'Admin'
+      logActivity({
+        actorName: adminName,
+        clientName: target.clients?.entity_name || 'Client',
+        action: 'Approved Menu Edit',
+        districtState: [target.city, target.state].filter(Boolean).join(', ') || 'Karnataka',
+        eventStartDate: target.event_date,
+        eventCode: target.event_code || 'EVENT',
+      })
+    }
+
     fetchEvents()
   }
 
@@ -101,7 +153,7 @@ export default function Dashboard() {
   const getStatusBadge = (event: any) => {
     const s = (event.status || 'draft').toLowerCase()
 
-    if (s === 'cancelled') return <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">● CANCELLED</span>
+    if (s === 'cancelled') return <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">● REJECTED</span>
     if (s === 'confirmed') return <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">● CONFIRMED</span>
 
     if (event.quote_status === 'edit_requested' || s === 'edit_requested')
@@ -210,14 +262,7 @@ export default function Dashboard() {
                           <td className="px-6 py-5">{getStatusBadge(event)}</td>
                           <td className="px-6 py-5 text-right relative">
                             <div className="flex items-center justify-end gap-3">
-                              <button onClick={() => copyClientLink(event.id)} className="text-gray-400 hover:text-blue-600 transition" title="Copy Client Link">🔗</button>
-                              <Link
-                                href={`/client-menu/${event.id}?preview=true`}
-                                className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition whitespace-nowrap"
-                                title="Preview Menu"
-                              >
-                                👁️ Preview
-                              </Link>
+                              {/* Removed Preview Link icon and Preview button as specified */}
                               <div className="relative">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === event.id ? null : event.id) }}
@@ -232,11 +277,11 @@ export default function Dashboard() {
                                   >
                                     <div className="p-2 border-b bg-gray-50 text-[10px] font-black text-gray-400 uppercase">Manage</div>
                                     <Link href={`/client-menu/${event.id}`} target="_blank" className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">👁️ Preview Menu</Link>
-                                    <Link href={`/quotation/${event.id}?tab=settings`} className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">✏️ Edit Details</Link>
+                                    {/* Removed Edit Details from Manage dropdown menu as specified */}
                                     {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') && (
                                       <button onClick={() => handleApproveEdit(event.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-purple-700 hover:bg-purple-50 border-b border-gray-50">🔓 Approve Edit</button>
                                     )}
-                                    <button onClick={() => handleStatusChange(event.id, 'confirmed')} className="w-full text-left px-4 py-3 text-xs font-bold text-green-700 hover:bg-green-50">✅ Confirm</button>
+                                    <button onClick={() => handleStatusChange(event.id, 'confirmed')} className="w-full text-left px-4 py-3 text-xs font-bold text-green-700 hover:bg-green-50 border-b border-gray-50">✅ Confirm</button>
                                     <button onClick={() => handleStatusChange(event.id, 'cancelled')} className="w-full text-left px-4 py-3 text-xs font-bold text-red-700 hover:bg-red-50">⛔ Cancel</button>
                                   </div>
                                 )}
@@ -251,6 +296,7 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
+
 
             {/* Mobile Cards - Visible on Mobile */}
             <div className="lg:hidden divide-y divide-gray-100">
@@ -282,12 +328,6 @@ export default function Dashboard() {
                       <Link href={`/client-menu/${event.id}?preview=true`} className="bg-blue-50 text-blue-600 py-2 rounded-lg text-xs font-bold text-center border border-blue-100">
                         Preview Menu
                       </Link>
-                      <Link href={`/quotation/${event.id}?tab=settings`} className="bg-gray-100 text-gray-600 py-2 rounded-lg text-xs font-bold text-center border border-gray-200">
-                        Settings
-                      </Link>
-                      <button onClick={() => copyClientLink(event.id)} className="bg-gray-100 text-gray-600 py-2 rounded-lg text-xs font-bold text-center border border-gray-200">
-                        Copy Link
-                      </button>
                     </div>
                   </div>
                 ))
