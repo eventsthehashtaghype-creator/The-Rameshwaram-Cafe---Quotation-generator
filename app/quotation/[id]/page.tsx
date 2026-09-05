@@ -2,7 +2,14 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/app/lib/supabase'
-import { logActivity } from '@/app/lib/audit'
+import { logActivity, getActivityLogs, getCurrentActorName, LogEntry } from '@/app/lib/audit'
+import {
+    saveQuotationVersion,
+    getQuotationVersions,
+    restoreQuotationVersion,
+    QuotationVersion,
+    QuotationSnapshot
+} from '@/app/lib/versions'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { jsPDF } from 'jspdf'
@@ -31,6 +38,17 @@ export default function QuotationPage() {
     const [isMenuLocked, setIsMenuLocked] = useState(false)
     const [showEditReasonModal, setShowEditReasonModal] = useState(false)
     const [editReason, setEditReason] = useState('')
+
+    // --- VERSIONS & REVISION WORKFLOW STATE ---
+    const [versions, setVersions] = useState<QuotationVersion[]>([])
+    const [eventAuditLogs, setEventAuditLogs] = useState<LogEntry[]>([])
+    const [showSaveRevisionModal, setShowSaveRevisionModal] = useState(false)
+    const [revisionActorName, setRevisionActorName] = useState('')
+    const [revisionReason, setRevisionReason] = useState('')
+    const [selectedVersionForView, setSelectedVersionForView] = useState<QuotationVersion | null>(null)
+    const [selectedVersionForRestore, setSelectedVersionForRestore] = useState<QuotationVersion | null>(null)
+    const [rollbackReason, setRollbackReason] = useState('')
+    const [isRestoring, setIsRestoring] = useState(false)
 
     // --- EDITING STATE ---
     const [saving, setSaving] = useState(false)
@@ -247,11 +265,239 @@ export default function QuotationPage() {
                 setItemStationMap(map)
             }
 
+            // 4. Fetch Versions & seed initial version if empty
+            const vers = await getQuotationVersions(id as string)
+            if (vers.length === 0 && eventData) {
+                const initialGrandTotal = (menuData || []).reduce((sum: number, item: any) => sum + ((item.pax || 0) * (item.price_per_plate || 0)), 0)
+                const initialSnap: QuotationSnapshot = {
+                    event: {
+                        startDate: eventData.event_date || '',
+                        endDate: eventData.end_date || eventData.event_date || '',
+                        eventType: eventData.event_type || 'B2C',
+                        eventSize: eventData.event_size || 'Small',
+                        venueName: eventData.venue_name || '',
+                        fullAddress: eventData.venue_address || '',
+                        city: eventData.city || '',
+                        state: eventData.state || '',
+                        googleMapsLink: eventData.google_maps_link || '',
+                        pocName: eventData.poc_name || '',
+                        pocMobile: eventData.poc_mobile || '',
+                        pocEmail: eventData.poc_email || '',
+                    },
+                    client: {
+                        clientName: eventData.clients?.entity_name || '',
+                        clientGst: eventData.clients?.gst_number || '',
+                        clientContact: eventData.clients?.contact_person || '',
+                        clientMobile: eventData.clients?.mobile || '',
+                        clientEmail: eventData.clients?.email || '',
+                    },
+                    selections: (menuData || []).map((s: any, idx: number) => ({
+                        id: s.id,
+                        category_title: s.category_title,
+                        pax: s.pax || 0,
+                        price_per_plate: s.price_per_plate || 0,
+                        selected_items: typeof s.selected_items === 'string' ? JSON.parse(s.selected_items) : (s.selected_items || []),
+                        order_index: s.order_index || idx + 1,
+                    })),
+                    terms: (eventData.terms_and_conditions && Array.isArray(eventData.terms_and_conditions))
+                        ? eventData.terms_and_conditions
+                        : defaultTerms,
+                    financials: {
+                        grandTotal: initialGrandTotal,
+                        gst: initialGrandTotal * 0.18,
+                        finalAmount: initialGrandTotal * 1.18,
+                    }
+                }
+                saveQuotationVersion({
+                    eventId: id as string,
+                    actorName: 'System',
+                    reason: 'Initial quotation created',
+                    snapshot: initialSnap,
+                    eventCode: eventData.event_code,
+                    clientName: eventData.clients?.entity_name,
+                    districtState: [eventData.city, eventData.state].filter(Boolean).join(', '),
+                }).then(seeded => {
+                    setVersions([seeded])
+                }).catch(err => console.warn('Could not auto-seed initial version:', err))
+            } else {
+                setVersions(vers)
+            }
+
+            // 5. Fetch Event-specific Audit Logs
+            const allLogs = await getActivityLogs(200)
+            const matchedLogs = allLogs.filter(l => l.eventCode === eventData.event_code || l.eventId === id)
+            setEventAuditLogs(matchedLogs)
+
             setLoading(false)
         } catch (error) {
             console.error("Critical error in fetchData:", error)
             alert("Unexpected error loading quotation.")
             setLoading(false)
+        }
+    }
+
+    // Helper: Build snapshot of current state
+    const getCurrentSnapshot = (): QuotationSnapshot => {
+        const subtotal = selections.reduce((sum, item) => sum + (item.pax * item.price_per_plate), 0)
+        const gstVal = subtotal * 0.18
+        return {
+            event: {
+                startDate,
+                endDate,
+                eventType,
+                eventSize,
+                venueName,
+                fullAddress,
+                city,
+                state,
+                googleMapsLink,
+                pocName,
+                pocMobile,
+                pocEmail,
+            },
+            client: {
+                clientName,
+                clientGst,
+                clientContact,
+                clientMobile,
+                clientEmail,
+            },
+            selections: selections.map((s, idx) => ({
+                id: s.id,
+                category_title: s.category_title,
+                pax: s.pax,
+                price_per_plate: s.price_per_plate,
+                selected_items: s.selected_items || [],
+                order_index: s.order_index || idx + 1,
+            })),
+            terms: terms,
+            financials: {
+                grandTotal: subtotal,
+                gst: gstVal,
+                finalAmount: subtotal + gstVal,
+            }
+        }
+    }
+
+    // Open Save Revision Modal
+    const openSaveRevisionModal = async (defaultReason = '') => {
+        const actor = await getCurrentActorName()
+        setRevisionActorName(actor)
+        setRevisionReason(defaultReason)
+        setShowSaveRevisionModal(true)
+    }
+
+    // Commit a new Quotation Version
+    const handleCommitRevision = async () => {
+        if (!revisionReason.trim()) {
+            alert("Please enter a reason for this change/revision.")
+            return
+        }
+
+        setSaving(true)
+        setShowSaveRevisionModal(false)
+
+        try {
+            // 1. Update Event details in Supabase
+            const { error: eventError } = await supabase.from('events').update({
+                event_date: startDate,
+                end_date: endDate,
+                event_type: eventType,
+                event_size: eventSize,
+                venue_name: venueName,
+                venue_address: fullAddress,
+                city,
+                state,
+                google_maps_link: googleMapsLink,
+                poc_name: pocName,
+                poc_mobile: pocMobile,
+                poc_email: pocEmail,
+                terms_and_conditions: terms
+            }).eq('id', id)
+
+            if (eventError) {
+                alert("Error saving event: " + eventError.message)
+                setSaving(false)
+                return
+            }
+
+            // 2. Update Client in Supabase if needed
+            if (clientId) {
+                await supabase.from('clients').update({
+                    entity_name: clientName,
+                    gst_number: clientGst,
+                    contact_person: clientContact,
+                    mobile: clientMobile,
+                    email: clientEmail
+                }).eq('id', clientId)
+            }
+
+            // 3. Save current selections to Supabase
+            for (const s of selections) {
+                await supabase.from('menu_selections').update({
+                    pax: s.pax,
+                    price_per_plate: s.price_per_plate,
+                    selected_items: JSON.stringify(s.selected_items || []),
+                    order_index: s.order_index
+                }).eq('id', s.id)
+            }
+
+            // 4. Save Version Snapshot
+            const currentSnap = getCurrentSnapshot()
+            const districtState = [city, state].filter(Boolean).join(', ') || 'Karnataka'
+            const newVer = await saveQuotationVersion({
+                eventId: id as string,
+                actorName: revisionActorName || 'Admin',
+                reason: revisionReason,
+                snapshot: currentSnap,
+                eventCode: event?.event_code,
+                clientName: clientName || event?.clients?.entity_name,
+                districtState,
+            })
+
+            setHasUnsavedChanges(false)
+            setSaving(false)
+            setRevisionReason('')
+            alert(`✅ Quotation Revision v${newVer.versionNumber} saved successfully!`)
+            await fetchData()
+        } catch (err: any) {
+            console.error("Error committing revision:", err)
+            alert("Error saving revision: " + err.message)
+            setSaving(false)
+        }
+    }
+
+    // Rollback / Restore to a previous version
+    const handleRestoreVersion = async () => {
+        if (!selectedVersionForRestore) return
+        if (!rollbackReason.trim()) {
+            alert("Please enter a reason for rolling back to this version.")
+            return
+        }
+
+        setIsRestoring(true)
+        try {
+            const actor = await getCurrentActorName()
+            const districtState = [city, state].filter(Boolean).join(', ') || 'Karnataka'
+            await restoreQuotationVersion({
+                eventId: id as string,
+                targetVersion: selectedVersionForRestore,
+                actorName: actor,
+                reason: rollbackReason,
+                eventCode: event?.event_code,
+                districtState,
+            })
+
+            setIsRestoring(false)
+            setSelectedVersionForRestore(null)
+            setRollbackReason('')
+            alert(`✅ Successfully restored to Version ${selectedVersionForRestore.versionNumber}! A new rollback revision has been recorded.`)
+            await fetchData()
+            setActiveTab('quote')
+        } catch (e: any) {
+            console.error("Error restoring version:", e)
+            alert("Failed to restore version: " + e.message)
+            setIsRestoring(false)
         }
     }
 
@@ -275,6 +521,7 @@ export default function QuotationPage() {
         }))
 
         setSelections(sequencedSelections)
+        setHasUnsavedChanges(true)
 
         // Sync to Supabase in background
         try {
@@ -303,58 +550,13 @@ export default function QuotationPage() {
         if (!selection) return
         const newItems = selection.selected_items.filter((i: string) => i !== itemToRemove)
         setSelections(prev => prev.map(s => s.id === selectionId ? { ...s, selected_items: newItems } : s))
+        setHasUnsavedChanges(true)
         await supabase.from('menu_selections').update({ selected_items: JSON.stringify(newItems) }).eq('id', selectionId)
     }
 
     // SAVE EVENT SETTINGS
     const handleSaveSettings = async () => {
-        setSaving(true)
-
-        // 1. Update Event
-        const { error: eventError } = await supabase.from('events').update({
-            event_date: startDate,
-            end_date: endDate,
-            event_type: eventType,
-            event_size: eventSize,
-            venue_name: venueName,
-            venue_address: fullAddress,
-            city,
-            state,
-            google_maps_link: googleMapsLink,
-            poc_name: pocName,
-            poc_mobile: pocMobile,
-            poc_email: pocEmail,
-            terms_and_conditions: terms
-
-        }).eq('id', id)
-
-        if (eventError) {
-            alert("Error saving event: " + eventError.message)
-            setSaving(false)
-            return
-        }
-
-        // 2. Update Client (if changed)
-        if (clientId) {
-            const { error: clientError } = await supabase.from('clients').update({
-                entity_name: clientName,
-                gst_number: clientGst,
-                contact_person: clientContact,
-                mobile: clientMobile,
-                email: clientEmail
-            }).eq('id', clientId)
-
-            if (clientError) {
-                alert("Error saving client details: " + clientError.message)
-                setSaving(false)
-                return
-            }
-        }
-
-        setSaving(false)
-        setHasUnsavedChanges(false)
-        alert("Event & Client details updated successfully!")
-        fetchData() // Refresh
+        openSaveRevisionModal("Updated event settings and client details")
     }
 
     // MAP HANDLER
@@ -1023,12 +1225,39 @@ export default function QuotationPage() {
                     </div>
 
                     <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
-                        {['quote', 'settings'].map((tab) => (
-                            <button key={tab} onClick={() => setActiveTab(tab)} className={`px-5 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${activeTab === tab ? 'bg-white shadow-sm text-black' : 'text-gray-400 hover:text-gray-600'}`}>{tab}</button>
+                        {[
+                            { id: 'quote', label: 'Quote' },
+                            { id: 'settings', label: 'Settings' },
+                            { id: 'history', label: `Versions & History (${versions.length})` }
+                        ].map((tab) => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`px-4 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${
+                                    activeTab === tab.id
+                                        ? 'bg-white shadow-sm text-black'
+                                        : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
                         ))}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        {/* Save Revision Button */}
+                        <button
+                            onClick={() => openSaveRevisionModal()}
+                            className={`px-3.5 py-2 rounded text-xs font-bold transition flex items-center gap-1.5 shadow ${
+                                hasUnsavedChanges
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
+                                    : 'bg-black text-white hover:bg-gray-800'
+                            }`}
+                            title="Save a new version of this quotation with reason notes"
+                        >
+                            <span>💾</span> {hasUnsavedChanges ? 'Save Revision *' : 'Save Revision'}
+                        </button>
+
                         {/* Lock / Refresh Controls */}
                         <button onClick={handleRefreshMenu} className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded text-xs font-bold transition flex items-center gap-1.5" title="Refresh to update to latest Menu">
                             <span>🔄</span> Refresh Menu
@@ -1099,6 +1328,252 @@ export default function QuotationPage() {
                             <button onClick={handleUnlockForEdit} className="px-5 py-2 text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 rounded-lg shadow">Unlock & Edit</button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* SAVE REVISION MODAL */}
+            {showSaveRevisionModal && (
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xl">💾</span>
+                                <h3 className="text-lg font-black text-gray-900">Save Quotation Revision</h3>
+                            </div>
+                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
+                                Next: v{(versions[0]?.versionNumber || 0) + 1}
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-500 font-medium">
+                            Every change is tracked with author and reason for full version control and audit history.
+                        </p>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-[10px] font-black text-gray-500 uppercase mb-1 tracking-wider">Who is making this change?</label>
+                                <input
+                                    type="text"
+                                    value={revisionActorName}
+                                    onChange={e => setRevisionActorName(e.target.value)}
+                                    placeholder="Enter your name (e.g. Nagaraj, Kavya, Admin)..."
+                                    className="w-full border border-gray-300 p-2.5 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-[10px] font-black text-gray-500 uppercase mb-1 tracking-wider">
+                                    Reason for this Revision / Change <span className="text-red-500">*</span>
+                                </label>
+                                <textarea
+                                    value={revisionReason}
+                                    onChange={e => setRevisionReason(e.target.value)}
+                                    placeholder="Why was this quotation modified? (e.g. Client requested 50 additional guests for Lunch and added Live Dosa station)..."
+                                    rows={3}
+                                    className="w-full border border-gray-300 p-3 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-3 border-t">
+                            <button
+                                onClick={() => setShowSaveRevisionModal(false)}
+                                disabled={saving}
+                                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleCommitRevision}
+                                disabled={saving}
+                                className="px-6 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow transition flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                                <span>💾</span> {saving ? 'Saving Revision...' : 'Save & Record Version'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ROLLBACK / RESTORE CONFIRMATION MODAL */}
+            {selectedVersionForRestore && (
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+                        <div className="flex items-center gap-2 border-b pb-3">
+                            <span className="text-xl">↺</span>
+                            <div>
+                                <h3 className="text-lg font-black text-gray-900">
+                                    Restore to Version {selectedVersionForRestore.versionNumber}
+                                </h3>
+                                <p className="text-[11px] text-gray-500 font-medium">
+                                    Originally created on {new Date(selectedVersionForRestore.createdAt).toLocaleString('en-GB')} by {selectedVersionForRestore.actorName}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+                            <p className="font-bold">⚠️ Notice: Reverting Quotation</p>
+                            <p className="text-[11px] text-amber-800">
+                                This will restore the menu selections, PAX, per-plate pricing, event dates, venue, and terms back to Version {selectedVersionForRestore.versionNumber}. A new revision version will be recorded so your history remains intact.
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-wider">
+                                Reason for Rollback <span className="text-red-500">*</span>
+                            </label>
+                            <textarea
+                                value={rollbackReason}
+                                onChange={e => setRollbackReason(e.target.value)}
+                                placeholder="Why are you restoring to this previous version? (e.g. Client preferred earlier pricing package)..."
+                                rows={3}
+                                className="w-full border border-gray-300 p-3 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-amber-500 text-black bg-white"
+                            />
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-3 border-t">
+                            <button
+                                onClick={() => { setSelectedVersionForRestore(null); setRollbackReason('') }}
+                                disabled={isRestoring}
+                                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleRestoreVersion}
+                                disabled={isRestoring}
+                                className="px-6 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow transition flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                                <span>↺</span> {isRestoring ? 'Restoring...' : `Confirm & Restore v${selectedVersionForRestore.versionNumber}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* VIEW SNAPSHOT MODAL */}
+            {selectedVersionForView && (
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+                        <div className="p-5 border-b flex justify-between items-center bg-gray-50">
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="px-2.5 py-0.5 rounded-full bg-blue-600 text-white font-black text-xs">
+                                        Version {selectedVersionForView.versionNumber}
+                                    </span>
+                                    <span className="font-bold text-gray-700 text-sm">
+                                        Snapshot by {selectedVersionForView.actorName}
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-gray-500 mt-0.5">
+                                    Saved on {new Date(selectedVersionForView.createdAt).toLocaleString('en-GB')}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setSelectedVersionForView(null)}
+                                className="text-gray-400 hover:text-black font-bold p-2 text-sm"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto space-y-6 text-xs text-black">
+                            {/* Reason Box */}
+                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                                <span className="text-[10px] font-black uppercase text-blue-600 tracking-wider block mb-1">Reason for Revision</span>
+                                <p className="font-medium text-blue-950 text-sm italic">"{selectedVersionForView.reason}"</p>
+                            </div>
+
+                            {/* Summary Grid */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase">Subtotal</span>
+                                    <p className="text-sm font-black text-black mt-0.5">₹{Math.round(selectedVersionForView.snapshot.financials?.grandTotal || 0).toLocaleString('en-IN')}</p>
+                                </div>
+                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase">GST (18%)</span>
+                                    <p className="text-sm font-black text-black mt-0.5">₹{Math.round(selectedVersionForView.snapshot.financials?.gst || 0).toLocaleString('en-IN')}</p>
+                                </div>
+                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase">Grand Total</span>
+                                    <p className="text-base font-black text-emerald-600 mt-0.5">₹{Math.round(selectedVersionForView.snapshot.financials?.finalAmount || 0).toLocaleString('en-IN')}</p>
+                                </div>
+                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase">Total Guests</span>
+                                    <p className="text-sm font-black text-black mt-0.5">
+                                        {selectedVersionForView.snapshot.selections?.reduce((sum, s) => sum + (s.pax || 0), 0)} PAX
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Menu Selections Table */}
+                            <div>
+                                <h4 className="font-black text-sm uppercase tracking-wider text-gray-700 mb-2">Menu Selections in this Version</h4>
+                                <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+                                    {selectedVersionForView.snapshot.selections?.map((sel, sIdx) => (
+                                        <div key={sIdx} className="p-3 bg-white">
+                                            <div className="flex justify-between items-center font-bold mb-1">
+                                                <span className="text-amber-800">{sel.category_title}</span>
+                                                <span className="text-gray-600 font-mono">
+                                                    {sel.pax} PAX × ₹{sel.price_per_plate} = ₹{(sel.pax * sel.price_per_plate).toLocaleString('en-IN')}
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5 mt-1">
+                                                {(sel.selected_items || []).map((item, iIdx) => (
+                                                    <span key={iIdx} className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[11px]">
+                                                        {item}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Venue & Dates */}
+                            <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                <div>
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase">Event Schedule</span>
+                                    <p className="font-bold text-gray-800 mt-0.5">
+                                        {selectedVersionForView.snapshot.event.startDate} to {selectedVersionForView.snapshot.event.endDate || selectedVersionForView.snapshot.event.startDate}
+                                    </p>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase">Venue</span>
+                                    <p className="font-bold text-gray-800 mt-0.5">
+                                        {selectedVersionForView.snapshot.event.venueName || selectedVersionForView.snapshot.event.city || 'N/A'}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
+                            <span className="text-xs text-gray-500 font-medium">
+                                Reviewing snapshot details for Version {selectedVersionForView.versionNumber}
+                            </span>
+                            <button
+                                onClick={() => setSelectedVersionForView(null)}
+                                className="px-5 py-2 bg-black text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* FLOATING UNSAVED CHANGES BANNER */}
+            {hasUnsavedChanges && !isClientPreview && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900/95 backdrop-blur text-white px-6 py-3 rounded-2xl shadow-2xl border border-gray-700 flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                        <span className="text-xs font-bold">You have unsaved changes in this quotation</span>
+                    </div>
+                    <button
+                        onClick={() => openSaveRevisionModal()}
+                        className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-1.5 rounded-xl text-xs font-black transition shadow flex items-center gap-1.5"
+                    >
+                        <span>💾</span> Save Revision & Reason
+                    </button>
                 </div>
             )}
 
@@ -1477,7 +1952,236 @@ export default function QuotationPage() {
                                     <div><label className={labelClass}>State</label><input className={inputClass} value={state} onChange={e => { setState(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                )}
 
+                {/* === VERSIONS & HISTORY TAB === */}
+                {activeTab === 'history' && (
+                    <div className="space-y-6">
+                        {/* Header Banner */}
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <h3 className="text-xl font-black text-black">Quotation Version Control & History</h3>
+                                    <span className="bg-blue-50 text-blue-700 text-xs font-black px-2.5 py-0.5 rounded-full border border-blue-200">
+                                        {versions.length} {versions.length === 1 ? 'Version' : 'Versions'} Recorded
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-500 font-medium mt-1">
+                                    Full audit trail of every change made to this quotation. Track who changed it, why, and roll back if needed.
+                                </p>
+                            </div>
+
+                            <button
+                                onClick={() => openSaveRevisionModal()}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md transition flex items-center gap-2 shrink-0 self-start sm:self-auto"
+                            >
+                                <span>💾</span> Save New Revision
+                            </button>
+                        </div>
+
+                        {/* Versions List */}
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-black uppercase text-gray-400 tracking-wider px-1">
+                                Revision History Timeline
+                            </h4>
+
+                            {versions.length === 0 ? (
+                                <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center text-gray-400 font-bold text-sm">
+                                    No revisions recorded yet. Click "Save New Revision" to record the first version snapshot!
+                                </div>
+                            ) : (
+                                versions.map((ver, idx) => {
+                                    const isLatest = idx === 0
+                                    const totalGuests = ver.snapshot.selections?.reduce((sum, s) => sum + (s.pax || 0), 0) || 0
+                                    const finalTotal = ver.snapshot.financials?.finalAmount || 0
+
+                                    return (
+                                        <div
+                                            key={ver.id || idx}
+                                            className={`bg-white rounded-2xl p-6 shadow-sm border transition ${
+                                                isLatest
+                                                    ? 'border-blue-400 ring-2 ring-blue-100'
+                                                    : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        >
+                                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                                                {/* Left Info */}
+                                                <div className="space-y-3 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="bg-black text-white px-3 py-1 rounded-lg text-xs font-black tracking-wider">
+                                                            VERSION {ver.versionNumber}
+                                                        </span>
+
+                                                        {isLatest && (
+                                                            <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-md text-[11px] font-black flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                                                Current Active Version
+                                                            </span>
+                                                        )}
+
+                                                        <span className="text-gray-400">•</span>
+                                                        {(() => {
+                                                            const raw = ver.actorName || 'System'
+                                                            const match = raw.match(/^([^(]+)(?:\s*\(([^)]+)\))?$/)
+                                                            const name = match ? match[1].trim() : raw
+                                                            const email = match && match[2] ? match[2].trim() : ''
+
+                                                            return (
+                                                                <span className="inline-flex items-center gap-1.5 text-xs font-black text-gray-800 bg-gray-100 px-2.5 py-0.5 rounded-md border border-gray-200">
+                                                                    <span>👤</span> {name}
+                                                                    {email && (
+                                                                        <span className="font-semibold text-gray-500 text-[11px] font-mono">({email})</span>
+                                                                    )}
+                                                                </span>
+                                                            )
+                                                        })()}
+
+                                                        <span className="text-gray-400">•</span>
+                                                        <span className="text-xs text-gray-400 font-medium">
+                                                            {new Date(ver.createdAt).toLocaleString('en-GB', {
+                                                                day: '2-digit',
+                                                                month: 'short',
+                                                                year: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit',
+                                                            })}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Reason Box */}
+                                                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3 text-xs">
+                                                        <span className="font-black text-[10px] text-amber-800 uppercase tracking-wider block mb-0.5">
+                                                            Reason for Revision / Change:
+                                                        </span>
+                                                        <p className="font-bold text-gray-900 text-sm">
+                                                            "{ver.reason}"
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Changes Summary */}
+                                                    {ver.changesSummary && (
+                                                        <p className="text-[11px] text-gray-500 font-medium">
+                                                            <span className="font-black text-gray-400 uppercase text-[10px] mr-1">Diff Summary:</span>
+                                                            {ver.changesSummary}
+                                                        </p>
+                                                    )}
+
+                                                    {/* Snapshot Metrics */}
+                                                    <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-gray-600 pt-1">
+                                                        <div className="bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                                                            <span className="text-gray-400 text-[10px] uppercase mr-1.5 font-normal">Total:</span>
+                                                            <span className="text-black font-black">₹{Math.round(finalTotal).toLocaleString('en-IN')}</span>
+                                                        </div>
+                                                        <div className="bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                                                            <span className="text-gray-400 text-[10px] uppercase mr-1.5 font-normal">PAX:</span>
+                                                            <span className="text-black font-black">{totalGuests}</span>
+                                                        </div>
+                                                        <div className="bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                                                            <span className="text-gray-400 text-[10px] uppercase mr-1.5 font-normal">Meals:</span>
+                                                            <span className="text-black font-black">{ver.snapshot.selections?.length || 0}</span>
+                                                        </div>
+                                                        <div className="bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                                                            <span className="text-gray-400 text-[10px] uppercase mr-1.5 font-normal">Dates:</span>
+                                                            <span className="text-gray-800">{ver.snapshot.event.startDate || 'N/A'}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Right Actions */}
+                                                <div className="flex sm:flex-col items-center sm:items-stretch gap-2 shrink-0 border-t sm:border-t-0 pt-3 sm:pt-0">
+                                                    <button
+                                                        onClick={() => setSelectedVersionForView(ver)}
+                                                        className="flex-1 sm:flex-initial bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                                                    >
+                                                        <span>👁️</span> View Snapshot
+                                                    </button>
+
+                                                    {!isLatest ? (
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedVersionForRestore(ver)
+                                                                setRollbackReason(`Restoring to Version ${ver.versionNumber}`)
+                                                            }}
+                                                            className="flex-1 sm:flex-initial bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                                                            title="Roll back to this version"
+                                                        >
+                                                            <span>↺</span> Restore This
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-center text-[10px] font-bold text-gray-400 py-1">
+                                                            Current Version
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+
+                        {/* Event Audit Trail */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 space-y-4">
+                            <div className="flex items-center justify-between border-b pb-3">
+                                <div>
+                                    <h4 className="font-black text-sm uppercase tracking-wider text-black">
+                                        Quotation Activity Log
+                                    </h4>
+                                    <p className="text-xs text-gray-500 font-medium mt-0.5">
+                                        Every action taken on {event.event_code} by admins, staff, and clients
+                                    </p>
+                                </div>
+                                <span className="text-xs text-gray-400 font-bold">
+                                    {eventAuditLogs.length} Records
+                                </span>
+                            </div>
+
+                            {eventAuditLogs.length === 0 ? (
+                                <p className="text-center text-gray-400 py-6 text-xs font-medium">
+                                    No separate actions recorded yet for this quotation.
+                                </p>
+                            ) : (
+                                <div className="divide-y divide-gray-100">
+                                    {eventAuditLogs.map((log, idx) => (
+                                        <div key={log.id || idx} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                            <div className="space-y-1">
+                                                <div className="flex items-center gap-2">
+                                                    {(() => {
+                                                        const raw = log.actorName || 'System'
+                                                        const match = raw.match(/^([^(]+)(?:\s*\(([^)]+)\))?$/)
+                                                        const name = match ? match[1].trim() : raw
+                                                        const email = match && match[2] ? match[2].trim() : ''
+
+                                                        return (
+                                                            <span className="font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100 inline-flex items-center gap-1.5">
+                                                                <span>👤</span> {name}
+                                                                {email && (
+                                                                    <span className="text-blue-500 font-semibold text-[11px] font-mono">({email})</span>
+                                                                )}
+                                                            </span>
+                                                        )
+                                                    })()}
+                                                    <span className="font-black text-gray-900">
+                                                        {log.action}
+                                                    </span>
+                                                </div>
+                                                {log.details && (
+                                                    <p className="text-[11px] text-gray-500 italic pl-1">
+                                                        {log.details}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            {log.timestamp && (
+                                                <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                                                    {new Date(log.timestamp).toLocaleString('en-GB')}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

@@ -153,6 +153,7 @@ export default function PortalDashboard() {
                       {event.status === 'confirmed' && <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">Confirmed</span>}
                       {event.status === 'cancelled' && <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">Cancelled</span>}
                       {(event.status === 'edit_requested' || event.quote_status === 'edit_requested') && <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[10px] font-black uppercase rounded tracking-wide border border-purple-100">Edit Requested</span>}
+                      {event.menu_locked && <span className="ml-2 px-2.5 py-1 bg-amber-50 text-amber-700 text-[10px] font-black uppercase rounded tracking-wide border border-amber-200">🔒 Menu Locked</span>}
                     </td>
                     <td className="px-6 py-5 text-right">
                         <div className="relative inline-block text-left group">
@@ -172,7 +173,11 @@ export default function PortalDashboard() {
                               📄 View / Download Menu
                             </Link>
 
-                             {isEventLockedByDate(event.event_date) ? (
+                             {event.menu_locked ? (
+                              <button disabled className="px-4 py-3 text-xs font-bold text-left text-amber-700 bg-amber-50 cursor-not-allowed border-t border-gray-100 flex items-center gap-1.5">
+                                <span>🔒</span> Menu Locked by Admin
+                              </button>
+                            ) : isEventLockedByDate(event.event_date) ? (
                               <button disabled className="px-4 py-3 text-xs font-bold text-left text-gray-400 bg-gray-50/50 cursor-not-allowed border-t border-gray-100">
                                 🔒 Editing Locked (within 2 days of event)
                               </button>

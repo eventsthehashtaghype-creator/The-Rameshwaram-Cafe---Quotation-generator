@@ -1,30 +1,20 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { supabase } from '@/app/lib/supabase'
 import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [adminName, setAdminName] = useState('Anand')
-  const [customAdminName, setCustomAdminName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
-  useEffect(() => {
-    const saved = localStorage.getItem('admin_login_name')
-    if (saved) setAdminName(saved)
-  }, [])
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
-    const activeName = adminName === 'Other' ? (customAdminName.trim() || 'Admin User') : adminName
-    localStorage.setItem('admin_login_name', activeName)
-
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
@@ -33,6 +23,15 @@ export default function LoginPage() {
       setErrorMsg(error.message)
       setLoading(false)
     } else {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('admin_login_name')
+        if (data?.user) {
+          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.user.id).single()
+          const fullName = profile?.full_name?.trim() || data.user.user_metadata?.full_name || email.split('@')[0] || 'Admin'
+          localStorage.setItem('auth_user_name', fullName)
+          localStorage.setItem('auth_user_email', data.user.email || email)
+        }
+      }
       // Success! Go to Dashboard
       router.push('/')
     }
@@ -60,32 +59,6 @@ export default function LoginPage() {
         {/* Login Form */}
         <div className="p-8 pt-10">
           <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2 ml-1">Admin Name of Login</label>
-              <select
-                value={adminName}
-                onChange={e => setAdminName(e.target.value)}
-                className="w-full border border-slate-200 bg-slate-50 p-3.5 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition"
-              >
-                <option value="Anand">Anand</option>
-                <option value="Nagaraj">Nagaraj</option>
-                <option value="Accounts">Accounts</option>
-                <option value="Kavya">Kavya</option>
-                <option value="Admin">Admin</option>
-                <option value="Other">Other...</option>
-              </select>
-              {adminName === 'Other' && (
-                <input
-                  type="text"
-                  required
-                  className="w-full border border-slate-200 bg-slate-50 p-3.5 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition mt-2"
-                  placeholder="Enter Admin Name"
-                  value={customAdminName}
-                  onChange={e => setCustomAdminName(e.target.value)}
-                />
-              )}
-            </div>
-
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase mb-2 ml-1">Admin Email</label>
               <input
@@ -132,4 +105,4 @@ export default function LoginPage() {
       </div>
     </div>
   )
-}
+}

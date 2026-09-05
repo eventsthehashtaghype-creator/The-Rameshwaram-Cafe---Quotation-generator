@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/app/lib/supabase'
 import { logActivity } from '@/app/lib/audit'
+import { MenuPreset, getAllPresets, saveCustomPreset, deleteCustomPreset } from '@/app/lib/presets'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -26,6 +27,7 @@ function ClientMenuContent() {
     const [submitted, setSubmitted] = useState(false)
     const [allowEdit, setAllowEdit] = useState(false)
     const [isLockedByDate, setIsLockedByDate] = useState(false)
+    const [isMenuLockedByAdmin, setIsMenuLockedByAdmin] = useState(false)
 
     // DATA STATE
     const [menuData, setMenuData] = useState<MenuCategory[]>([])
@@ -40,12 +42,24 @@ function ClientMenuContent() {
     const [activeSession, setActiveSession] = useState<{ dayIndex: number; categoryId: string } | null>(null)
     const [expandedStations, setExpandedStations] = useState<Record<string, boolean>>({})
 
+    // PRESET MENUS STATE
+    const [presets, setPresets] = useState<MenuPreset[]>([])
+    const [isSavePresetModalOpen, setIsSavePresetModalOpen] = useState(false)
+    const [newPresetName, setNewPresetName] = useState('')
+    const [newPresetDesc, setNewPresetDesc] = useState('')
+    const [presetToast, setPresetToast] = useState<string | null>(null)
+
+    useEffect(() => {
+        setPresets(getAllPresets())
+    }, [])
+
     // 1. FETCH DATA
     useEffect(() => {
         async function fetchData() {
             setLoading(true)
 
             // A. Fetch Event
+            let dateLocked = false
             const { data: eventData } = await supabase.from('events').select('*, clients(*)').eq('id', id).single()
             if (eventData) {
                 setEvent(eventData)
@@ -54,10 +68,12 @@ function ClientMenuContent() {
                 const limitDate = new Date(eventDate)
                 limitDate.setDate(limitDate.getDate() - 2)
                 const today = new Date()
-                const dateLocked = today >= limitDate
+                dateLocked = today >= limitDate
                 setIsLockedByDate(dateLocked)
+                const adminLocked = eventData.menu_locked === true
+                setIsMenuLockedByAdmin(adminLocked)
 
-                const isLocked = dateLocked || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
+                const isLocked = dateLocked || adminLocked || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
                 if (isLocked && !isPreview) setSubmitted(true) // Block editing if already submitted/locked
 
                 // Calculate Days
@@ -93,7 +109,7 @@ function ClientMenuContent() {
             let restoredFromLocal = false
             const localConfig = localStorage.getItem(`menu_config_${id}`)
             const localSels = localStorage.getItem(`menu_sels_${id}`)
-            const isLocked = eventData ? ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status) : false
+            const isLocked = eventData ? (dateLocked || eventData.menu_locked === true || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)) : false
 
             if (localConfig && localSels && !isLocked) {
                 try {
@@ -163,7 +179,10 @@ function ClientMenuContent() {
     }
 
     const handleAddCustomItem = () => {
-        if (!activeSession) return
+        if (!activeSession || event?.menu_locked) {
+            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+            return
+        }
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
         const input = document.getElementById('custom-item-input') as HTMLInputElement
         const name = input?.value?.trim()
@@ -184,7 +203,10 @@ function ClientMenuContent() {
     }
 
     const removeCustomItem = (name: string) => {
-        if (!activeSession) return
+        if (!activeSession || event?.menu_locked) {
+            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+            return
+        }
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
         setMenuSelections(prev => {
             const current = prev[key] || []
@@ -195,8 +217,85 @@ function ClientMenuContent() {
         })
     }
 
-    const toggleMenuItem = (item: string, station?: any) => {
+    const showPresetToast = (msg: string) => {
+        setPresetToast(msg)
+        setTimeout(() => setPresetToast(null), 3500)
+    }
+
+    const applyPreset = (preset: MenuPreset, dayIndex: number, categoryId: string, replace: boolean = true) => {
+        if (event?.menu_locked) {
+            alert("Menu is locked by administrator. Changes cannot be made.")
+            return
+        }
+        const key = getSessionKey(dayIndex, categoryId)
+        const current = menuSelections[key] || []
+        const nextItems = replace ? [...preset.items] : Array.from(new Set([...current, ...preset.items]))
+        
+        setMenuSelections(prev => ({
+            ...prev,
+            [key]: nextItems
+        }))
+        showPresetToast(`Applied preset "${preset.name}" (${preset.items.length} items)`)
+    }
+
+    const clearActiveSessionItems = () => {
+        if (!activeSession || event?.menu_locked) {
+            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+            return
+        }
+        if (!confirm("Clear all selected items for this session?")) return
+        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+        setMenuSelections(prev => ({ ...prev, [key]: [] }))
+        showPresetToast("Cleared all selected items for this session")
+    }
+
+    const handleSaveCurrentAsPreset = () => {
         if (!activeSession) return
+        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+        const items = menuSelections[key] || []
+        if (items.length === 0) {
+            alert("Please select at least one item before saving as a preset.")
+            return
+        }
+        if (!newPresetName.trim()) {
+            alert("Please enter a name for your preset menu.")
+            return
+        }
+
+        const activeCat = menuData.find(c => c.id === activeSession.categoryId)
+        const catUpper = (activeCat?.title || '').toUpperCase()
+        const mealCat = (catUpper.includes('BREAKFAST') ? 'BREAKFAST'
+            : catUpper.includes('LUNCH') ? 'LUNCH'
+            : catUpper.includes('HI-TEA') || catUpper.includes('TEA') ? 'HI-TEA'
+            : catUpper.includes('DINNER') ? 'DINNER'
+            : 'ALL') as any
+
+        saveCustomPreset({
+            name: newPresetName.trim(),
+            description: newPresetDesc.trim() || `Custom preset for ${activeCat?.title || 'Session'} with ${items.length} items`,
+            mealCategory: mealCat,
+            items: [...items],
+        })
+
+        setPresets(getAllPresets())
+        setIsSavePresetModalOpen(false)
+        setNewPresetName('')
+        setNewPresetDesc('')
+        showPresetToast(`Saved preset "${newPresetName.trim()}" successfully!`)
+    }
+
+    const handleDeleteCustomPreset = (presetId: string, name: string) => {
+        if (!confirm(`Delete custom preset "${name}"?`)) return
+        deleteCustomPreset(presetId)
+        setPresets(getAllPresets())
+        showPresetToast(`Deleted preset "${name}"`)
+    }
+
+    const toggleMenuItem = (item: string, station?: any) => {
+        if (!activeSession || event?.menu_locked) {
+            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+            return
+        }
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
         
         setMenuSelections(prev => {
@@ -716,11 +815,16 @@ function ClientMenuContent() {
         )
     }
 
-    if (submitted && !isPreview && !allowEdit) return <SuccessScreen onEdit={() => setAllowEdit(true)} eventId={id as string} isLockedByDate={isLockedByDate} />
+    if (submitted && !isPreview && !allowEdit) return <SuccessScreen onEdit={() => { if (!isMenuLockedByAdmin && !isLockedByDate) setAllowEdit(true); }} eventId={id as string} isLockedByDate={isLockedByDate} isMenuLockedByAdmin={isMenuLockedByAdmin} />
     if (loading || !event) return <div className="h-screen flex items-center justify-center font-bold text-gray-400">Loading Planner...</div>
 
     return (
         <div className="min-h-screen bg-gray-50 font-sans text-black pb-32">
+            {isMenuLockedByAdmin && !isPreview && (
+                <div className="bg-amber-600 text-white px-4 py-2.5 text-center text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 sticky top-0 z-[100] shadow-md">
+                    <span>🔒</span> Menu Locked by Administrator — No changes can be made.
+                </div>
+            )}
             <Header event={event} />
 
             <div className="max-w-4xl mx-auto p-6">
@@ -884,6 +988,32 @@ function ClientMenuContent() {
                                             </div>
                                             {!isFixedMenu && <span className="text-xs font-bold uppercase tracking-widest text-black underline opacity-0 group-hover:opacity-100 transition-opacity">Customize →</span>}
                                         </div>
+
+                                        {!isFixedMenu && (
+                                            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-2" onClick={e => e.stopPropagation()}>
+                                                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1">
+                                                    <span>⚡</span> Preset:
+                                                </span>
+                                                <select
+                                                    className="text-xs font-bold bg-amber-50 text-amber-900 border border-amber-200 rounded-lg px-2.5 py-1.5 outline-none hover:bg-amber-100 transition cursor-pointer max-w-[170px] truncate"
+                                                    defaultValue=""
+                                                    onChange={(e) => {
+                                                        const p = presets.find(pr => pr.id === e.target.value)
+                                                        if (p) {
+                                                            applyPreset(p, dayIndex, catId)
+                                                            e.target.value = ""
+                                                        }
+                                                    }}
+                                                >
+                                                    <option value="" disabled>Choose Preset...</option>
+                                                    {presets.map(p => (
+                                                        <option key={p.id} value={p.id}>
+                                                            {p.name} ({p.items.length} items)
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
                                     </div>
                                 )
                             })}
@@ -911,6 +1041,108 @@ function ClientMenuContent() {
                                 </div>
 
                                 <div className="p-4 md:p-8 space-y-8 md:space-y-10 pb-20 overflow-y-auto flex-1 bg-gray-50">
+                                    {/* PRESET MENUS BAR */}
+                                    {(() => {
+                                        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+                                        const currentItems = menuSelections[key] || []
+                                        const activeCat = menuData.find(c => c.id === activeSession.categoryId)
+                                        const catTitleUpper = (activeCat?.title || '').toUpperCase()
+
+                                        const sortedPresets = [...presets].sort((a, b) => {
+                                            const aMatches = a.mealCategory === 'ALL' || catTitleUpper.includes(a.mealCategory)
+                                            const bMatches = b.mealCategory === 'ALL' || catTitleUpper.includes(b.mealCategory)
+                                            if (aMatches && !bMatches) return -1
+                                            if (!aMatches && bMatches) return 1
+                                            return 0
+                                        })
+
+                                        return (
+                                            <div className="bg-gradient-to-r from-amber-50 via-orange-50/50 to-amber-50 border border-amber-200/80 rounded-2xl p-4 md:p-5 shadow-sm space-y-3">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <span className="text-2xl">⚡</span>
+                                                        <div>
+                                                            <h4 className="text-sm font-black text-amber-950 uppercase tracking-wide">
+                                                                Quick Preset Menus
+                                                            </h4>
+                                                            <p className="text-xs text-amber-900/70 font-medium">
+                                                                Select a preset to auto-populate frequent combinations. All items remain 100% customisable!
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setIsSavePresetModalOpen(true)}
+                                                            disabled={currentItems.length === 0}
+                                                            className="bg-amber-900 text-white hover:bg-black px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                            title="Save current selected items as a new custom preset"
+                                                        >
+                                                            <span>⭐</span> Save Current as Preset
+                                                        </button>
+                                                        {currentItems.length > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={clearActiveSessionItems}
+                                                                className="bg-white hover:bg-red-50 text-red-600 border border-red-200 px-3.5 py-1.5 rounded-xl text-xs font-bold transition"
+                                                                title="Clear all selected items for this session"
+                                                            >
+                                                                Clear All
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Presets flex/scroll */}
+                                                <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 no-scrollbar">
+                                                    {sortedPresets.map(preset => {
+                                                        const selectedCount = preset.items.filter(i => currentItems.includes(i)).length
+                                                        const isFullySelected = selectedCount === preset.items.length && preset.items.length > 0
+
+                                                        return (
+                                                            <div
+                                                                key={preset.id}
+                                                                className={`shrink-0 flex items-center rounded-xl border transition-all ${
+                                                                    isFullySelected
+                                                                        ? 'bg-amber-900 text-white border-amber-950 shadow-md ring-2 ring-amber-400'
+                                                                        : 'bg-white hover:bg-amber-100/80 border-amber-200 text-slate-800'
+                                                                }`}
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => applyPreset(preset, activeSession.dayIndex, activeSession.categoryId)}
+                                                                    className="px-3.5 py-2 text-left flex flex-col justify-center"
+                                                                    title={preset.description}
+                                                                >
+                                                                    <span className="text-xs font-black leading-tight flex items-center gap-1.5">
+                                                                        {preset.isCustom ? '⭐' : '🍽️'} {preset.name}
+                                                                    </span>
+                                                                    <span className={`text-[10px] font-bold ${isFullySelected ? 'text-amber-200' : 'text-slate-500'}`}>
+                                                                        {preset.items.length} items {selectedCount > 0 && !isFullySelected ? `(${selectedCount} active)` : ''} • Click to apply
+                                                                    </span>
+                                                                </button>
+                                                                {preset.isCustom && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            handleDeleteCustomPreset(preset.id, preset.name)
+                                                                        }}
+                                                                        className="px-2.5 py-2 text-red-500 hover:text-red-700 text-xs font-bold border-l border-amber-200/60"
+                                                                        title="Delete custom preset"
+                                                                    >
+                                                                        ✕
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )
+                                    })()}
+
                                     {menuData.find(c => c.id === activeSession.categoryId)?.stations.map(station => {
                                         const isExpanded = expandedStations[station.id]
                                         return (
@@ -1024,7 +1256,7 @@ function ClientMenuContent() {
                 {/* STEP 4: FINAL PREVIEW */}
                 {step === 4 && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                        {!isPreview && (
+                        {!isPreview && !event?.menu_locked && !isLockedByDate && (
                             <button onClick={() => setStep(2)} className="mb-8 text-xs font-bold text-gray-500 hover:text-black flex items-center gap-2 transition uppercase tracking-widest">
                                 ← Edit Selections
                             </button>
@@ -1088,8 +1320,8 @@ function ClientMenuContent() {
                             </div>
                         </div>
 
-                        {!isPreview && (
-                            <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-gray-200 z-50 bg-opacity-95 backdrop-blur shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+                        {!isPreview && !event?.menu_locked && !isLockedByDate && (
+                            <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200 p-4 z-40">
                                 <div className="max-w-5xl mx-auto flex justify-end items-center">
                                     <button
                                         onClick={handleSubmit}
@@ -1101,10 +1333,99 @@ function ClientMenuContent() {
                                 </div>
                             </div>
                         )}
+
+                        {event?.menu_locked && !isPreview && (
+                            <div className="fixed bottom-0 left-0 right-0 bg-amber-950/95 backdrop-blur-md border-t border-amber-600/40 p-4 z-40 text-center">
+                                <span className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center justify-center gap-2">
+                                    <span>🔒</span> Menu Locked by Administrator — No changes can be submitted
+                                </span>
+                            </div>
+                        )}
                     </div>
                 )}
 
             </div>
+
+            {/* SAVE CURRENT AS PRESET MODAL */}
+            {isSavePresetModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xl">⭐</span>
+                                <h3 className="text-lg font-black text-gray-900">Save Preset Menu</h3>
+                            </div>
+                            <button
+                                onClick={() => setIsSavePresetModalOpen(false)}
+                                className="text-gray-400 hover:text-black font-bold text-lg"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="text-xs text-gray-500 font-medium leading-relaxed">
+                            Save the currently selected items as a reusable preset template for future frequent menu selections.
+                        </p>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 mb-1">Preset Name *</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g., South Indian Meals, Deluxe Wedding Lunch..."
+                                    value={newPresetName}
+                                    onChange={e => setNewPresetName(e.target.value)}
+                                    className="w-full border border-gray-200 rounded-xl p-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-amber-500"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault()
+                                            handleSaveCurrentAsPreset()
+                                        }
+                                    }}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 mb-1">Description (Optional)</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g., Signature 10-item lunch combo for special events"
+                                    value={newPresetDesc}
+                                    onChange={e => setNewPresetDesc(e.target.value)}
+                                    className="w-full border border-gray-200 rounded-xl p-3 text-sm font-medium text-gray-700 outline-none focus:ring-2 focus:ring-amber-500"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setIsSavePresetModalOpen(false)}
+                                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-xs hover:bg-gray-200 transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveCurrentAsPreset}
+                                className="flex-1 bg-amber-900 text-white py-3 rounded-xl font-bold text-xs hover:bg-black transition shadow-lg shadow-amber-900/20"
+                            >
+                                Save Preset
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* FLOATING PRESET TOAST NOTIFICATION */}
+            {presetToast && (
+                <div className="fixed bottom-6 right-6 z-[90] bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700 animate-in slide-in-from-bottom-5 duration-300">
+                    <span className="text-amber-400 text-lg">⚡</span>
+                    <span className="text-xs font-bold">{presetToast}</span>
+                    <button onClick={() => setPresetToast(null)} className="text-slate-400 hover:text-white text-xs ml-2">✕</button>
+                </div>
+            )}
         </div>
     )
 }
@@ -1144,14 +1465,32 @@ function StepFooter({ onNext, nextLabel, disabled }: any) {
     )
 }
 
-function SuccessScreen({ onEdit, eventId, isLockedByDate }: { onEdit: () => void, eventId: string, isLockedByDate: boolean }) {
+function SuccessScreen({ onEdit, eventId, isLockedByDate, isMenuLockedByAdmin }: { onEdit: () => void, eventId: string, isLockedByDate: boolean, isMenuLockedByAdmin: boolean }) {
     return (
-        <div className="h-screen flex flex-col items-center justify-center bg-black text-white p-10 text-center font-sans">
+        <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-6 sm:p-10 text-center font-sans">
             <div className="text-6xl mb-6">🎉</div>
-            <h1 className="text-4xl font-black mb-3">Menu Confirmed!</h1>
-            <p className="text-gray-400 text-lg max-w-md mb-8">Your selections have been sent to our team. We will review and provide the final quotation shortly.</p>
+            <h1 className="text-3xl sm:text-4xl font-black mb-3">Menu Confirmed!</h1>
+            <p className="text-gray-400 text-sm sm:text-base max-w-md mb-8">Your selections have been sent to our team. We will review and provide the final quotation shortly.</p>
+
+            {isMenuLockedByAdmin && (
+                <div className="bg-amber-950/60 border border-amber-500/40 text-amber-300 p-4 rounded-2xl flex items-center justify-center gap-3 mb-6 max-w-md w-full">
+                    <span className="text-xl">🔒</span>
+                    <div className="text-left">
+                        <p className="text-xs font-black uppercase tracking-wider">Menu Locked by Administrator</p>
+                        <p className="text-[11px] text-amber-200/80 font-medium mt-0.5">The administration has finalized and locked this menu. Editing is closed.</p>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
-                {isLockedByDate ? (
+                {isMenuLockedByAdmin ? (
+                    <button
+                        disabled
+                        className="bg-gray-800 text-gray-500 border border-gray-700 px-8 py-3 rounded-full text-xs font-bold shadow-lg cursor-not-allowed uppercase tracking-widest whitespace-nowrap"
+                    >
+                        🔒 Menu Locked by Admin
+                    </button>
+                ) : isLockedByDate ? (
                     <button
                         disabled
                         className="bg-gray-800 text-gray-500 border border-gray-700 px-8 py-3 rounded-full text-xs font-bold shadow-lg cursor-not-allowed uppercase tracking-widest whitespace-nowrap"

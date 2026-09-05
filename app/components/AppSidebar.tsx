@@ -15,8 +15,7 @@ export default function AppSidebar() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('admin_login_name')
-      if (saved) setAdminLoginName(saved)
+      localStorage.removeItem('admin_login_name')
     }
 
     async function fetchUserAccess() {
@@ -29,6 +28,10 @@ export default function AppSidebar() {
       const { data: userProfile, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).single()
       if (userProfile) {
         setProfile(userProfile)
+        if (typeof window !== 'undefined') {
+          if (userProfile.full_name) localStorage.setItem('auth_user_name', userProfile.full_name)
+          if (userProfile.email) localStorage.setItem('auth_user_email', userProfile.email)
+        }
 
         // Strict Protection: If they are on a protected URL without the checkbox permission, kick them out
         const perms = userProfile.permissions || {}
@@ -47,6 +50,11 @@ export default function AppSidebar() {
 
   // Logout Handler
   const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('admin_login_name')
+      localStorage.removeItem('auth_user_name')
+      localStorage.removeItem('auth_user_email')
+    }
     await supabase.auth.signOut()
     router.push('/login')
     router.refresh()
@@ -60,8 +68,10 @@ export default function AppSidebar() {
 
   const perms = profile?.permissions || {}
   const activeRoleBadge = perms.settings ? 'Admin Access' : 'Staff Access'
-  const displayName = adminLoginName ? `${adminLoginName} (${profile?.full_name || 'Admin'})` : (profile?.full_name || 'Admin')
-  const initials = adminLoginName ? adminLoginName.substring(0, 2).toUpperCase() : (profile?.full_name ? profile.full_name.substring(0, 2).toUpperCase() : 'AD')
+  const userFullName = profile?.full_name?.trim() || ''
+  const userEmail = profile?.email || ''
+  const displayName = userFullName || (userEmail ? userEmail.split('@')[0] : 'Admin')
+  const initials = displayName.substring(0, 2).toUpperCase()
 
   const NavContent = () => (
     <>
@@ -131,9 +141,10 @@ export default function AppSidebar() {
             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white ${perms.settings ? 'bg-purple-600' : 'bg-blue-600'}`}>
               {initials}
             </div>
-            <div>
-              <p className="text-xs font-bold text-white max-w-[120px] truncate">{displayName}</p>
-              <p className="text-[10px] text-gray-400">{activeRoleBadge}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-white max-w-[130px] truncate" title={displayName}>{displayName}</p>
+              {userEmail && <p className="text-[10px] text-gray-400 max-w-[130px] truncate" title={userEmail}>{userEmail}</p>}
+              <p className="text-[9px] text-blue-400 font-bold uppercase tracking-wider">{activeRoleBadge}</p>
             </div>
           </div>
           <button onClick={handleLogout} className="text-gray-500 hover:text-red-500 transition-colors p-1" title="Log Out">
