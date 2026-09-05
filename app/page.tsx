@@ -332,7 +332,17 @@ export default function Dashboard() {
                           </td>
                           <td className="px-6 py-5">
                             <div className="font-bold text-black text-sm">{event.clients?.entity_name || 'Unknown'}</div>
-                            <div className="text-[10px] text-gray-400 font-medium mt-1">{event.clients?.contact_person}</div>
+                            {event.clients?.contact_person && (
+                              <div className="text-[10px] text-gray-500 font-medium mt-0.5">{event.clients?.contact_person}</div>
+                            )}
+                            {([event.venue_name, event.venue_address, event.city].filter(Boolean).length > 0) && (
+                              <div className="text-[10px] text-amber-900 font-semibold mt-1 flex items-center gap-1" title={[event.venue_name, event.venue_address, event.city, event.state, event.venue_zipcode ? 'PIN: ' + event.venue_zipcode : ''].filter(Boolean).join(', ')}>
+                                <span className="shrink-0">📍</span>
+                                <span className="truncate max-w-[220px]">
+                                  {[event.venue_name, event.venue_address, event.city, event.venue_zipcode ? 'PIN: ' + event.venue_zipcode : ''].filter(Boolean).join(', ')}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="px-6 py-5">
                             {editingNoteId === event.id ? (
@@ -412,6 +422,12 @@ export default function Dashboard() {
                       <div>
                         <div className="font-bold text-gray-800 text-sm">{event.clients?.entity_name || 'Unknown Client'}</div>
                         <div className="text-[10px] text-gray-400 font-bold mt-0.5">{event.event_code} • {new Date(event.event_date).toLocaleDateString()}</div>
+                        {([event.venue_name, event.venue_address, event.city].filter(Boolean).length > 0) && (
+                          <div className="text-[11px] text-amber-900 font-semibold mt-1 flex items-start gap-1">
+                            <span className="shrink-0">📍</span>
+                            <span>{[event.venue_name, event.venue_address, event.city, event.state, event.venue_zipcode ? 'PIN: ' + event.venue_zipcode : ''].filter(Boolean).join(', ')}</span>
+                          </div>
+                        )}
                       </div>
                       {getStatusBadge(event)}
                     </div>

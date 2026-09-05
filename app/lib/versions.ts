@@ -11,6 +11,7 @@ export interface QuotationSnapshot {
     fullAddress: string
     city: string
     state: string
+    venueZipcode?: string
     googleMapsLink: string
     pocName: string
     pocMobile: string
@@ -22,6 +23,9 @@ export interface QuotationSnapshot {
     clientContact: string
     clientMobile: string
     clientEmail: string
+    clientAddress?: string
+    clientCity?: string
+    clientState?: string
   }
   selections: Array<{
     id?: string
@@ -251,6 +255,7 @@ export async function restoreQuotationVersion(params: {
       venue_address: snap.event.fullAddress,
       city: snap.event.city,
       state: snap.event.state,
+      venue_zipcode: snap.event.venueZipcode,
       google_maps_link: snap.event.googleMapsLink,
       poc_name: snap.event.pocName,
       poc_mobile: snap.event.pocMobile,
@@ -271,6 +276,9 @@ export async function restoreQuotationVersion(params: {
         contact_person: snap.client.clientContact,
         mobile: snap.client.clientMobile,
         email: snap.client.clientEmail,
+        address: snap.client.clientAddress,
+        city: snap.client.clientCity,
+        state: snap.client.clientState,
       }).eq('id', eventData.client_id)
     }
   } catch (e) {

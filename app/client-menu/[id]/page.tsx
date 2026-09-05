@@ -1433,16 +1433,41 @@ function ClientMenuContent() {
 // --- SUB-COMPONENTS ---
 
 function Header({ event }: { event: any }) {
+    const venueFull = [
+        event.venue_name,
+        event.venue_address,
+        event.city,
+        event.state,
+        event.venue_zipcode ? `PIN: ${event.venue_zipcode}` : ''
+    ].filter(Boolean).join(', ')
+
+    const clientFull = [
+        event.clients?.address,
+        event.clients?.city,
+        event.clients?.state
+    ].filter(Boolean).join(', ')
+
     return (
-        <div className="bg-white border-b border-gray-200 sticky top-0 z-50 bg-opacity-90 backdrop-blur-md">
-            <div className="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+        <div className="bg-white border-b border-gray-200 sticky top-0 z-50 bg-opacity-90 backdrop-blur-md shadow-sm">
+            <div className="max-w-5xl mx-auto px-6 py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-3">
                 <div>
-                    <h1 className="text-2xl font-black tracking-tight text-gray-900">{event.clients?.entity_name}</h1>
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-1">Event Menu Selection</p>
+                    <h1 className="text-2xl font-black tracking-tight text-gray-900">{event.clients?.entity_name || 'Event Menu'}</h1>
+                    {clientFull && (
+                        <p className="text-xs text-gray-600 font-medium mt-0.5">{clientFull}</p>
+                    )}
+                    {venueFull && (
+                        <p className="text-xs text-amber-900 font-semibold mt-1 flex items-start gap-1">
+                            <span className="shrink-0">📍 Venue:</span> <span>{venueFull}</span>
+                        </p>
+                    )}
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Event Menu Selection • Code: {event.event_code}</p>
                 </div>
-                <div className="text-right hidden md:block">
+                <div className="text-left md:text-right">
                     <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Event Date</span>
-                    <span className="font-bold text-lg text-gray-900">{new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                    <span className="font-bold text-base md:text-lg text-gray-900">
+                        {new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {event.end_date && event.end_date !== event.event_date ? ` – ${new Date(event.end_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                    </span>
                 </div>
             </div>
         </div>

@@ -68,6 +68,7 @@ export default function QuotationPage() {
     const [fullAddress, setFullAddress] = useState('')
     const [city, setCity] = useState('')
     const [state, setState] = useState('')
+    const [venueZipcode, setVenueZipcode] = useState('')
     const [googleMapsLink, setGoogleMapsLink] = useState('')
 
     // POC
@@ -82,6 +83,9 @@ export default function QuotationPage() {
     const [clientContact, setClientContact] = useState('')
     const [clientMobile, setClientMobile] = useState('')
     const [clientEmail, setClientEmail] = useState('')
+    const [clientAddress, setClientAddress] = useState('')
+    const [clientCity, setClientCity] = useState('')
+    const [clientState, setClientState] = useState('')
 
     // Helper for Currency
     const fmt = (n: number) => n.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
@@ -184,6 +188,7 @@ export default function QuotationPage() {
                 setFullAddress(eventData.venue_address || '')
                 setCity(eventData.city || '')
                 setState(eventData.state || '')
+                setVenueZipcode(eventData.venue_zipcode || '')
                 setGoogleMapsLink(eventData.google_maps_link || '')
 
                 setPocName(eventData.poc_name || '')
@@ -210,6 +215,9 @@ export default function QuotationPage() {
                     setClientContact(eventData.clients.contact_person || '')
                     setClientMobile(eventData.clients.mobile || '')
                     setClientEmail(eventData.clients.email || '')
+                    setClientAddress(eventData.clients.address || '')
+                    setClientCity(eventData.clients.city || '')
+                    setClientState(eventData.clients.state || '')
                 }
             }
 
@@ -279,6 +287,7 @@ export default function QuotationPage() {
                         fullAddress: eventData.venue_address || '',
                         city: eventData.city || '',
                         state: eventData.state || '',
+                        venueZipcode: eventData.venue_zipcode || '',
                         googleMapsLink: eventData.google_maps_link || '',
                         pocName: eventData.poc_name || '',
                         pocMobile: eventData.poc_mobile || '',
@@ -290,6 +299,9 @@ export default function QuotationPage() {
                         clientContact: eventData.clients?.contact_person || '',
                         clientMobile: eventData.clients?.mobile || '',
                         clientEmail: eventData.clients?.email || '',
+                        clientAddress: eventData.clients?.address || '',
+                        clientCity: eventData.clients?.city || '',
+                        clientState: eventData.clients?.state || '',
                     },
                     selections: (menuData || []).map((s: any, idx: number) => ({
                         id: s.id,
@@ -350,6 +362,7 @@ export default function QuotationPage() {
                 fullAddress,
                 city,
                 state,
+                venueZipcode,
                 googleMapsLink,
                 pocName,
                 pocMobile,
@@ -361,6 +374,9 @@ export default function QuotationPage() {
                 clientContact,
                 clientMobile,
                 clientEmail,
+                clientAddress,
+                clientCity,
+                clientState,
             },
             selections: selections.map((s, idx) => ({
                 id: s.id,
@@ -408,6 +424,7 @@ export default function QuotationPage() {
                 venue_address: fullAddress,
                 city,
                 state,
+                venue_zipcode: venueZipcode,
                 google_maps_link: googleMapsLink,
                 poc_name: pocName,
                 poc_mobile: pocMobile,
@@ -428,7 +445,10 @@ export default function QuotationPage() {
                     gst_number: clientGst,
                     contact_person: clientContact,
                     mobile: clientMobile,
-                    email: clientEmail
+                    email: clientEmail,
+                    address: clientAddress,
+                    city: clientCity,
+                    state: clientState,
                 }).eq('id', clientId)
             }
 
@@ -637,27 +657,69 @@ export default function QuotationPage() {
         const eventDateStr = new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
         const endDateStr = new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
 
+        const startYForHeader = yPos
         doc.setFontSize(11)
         doc.setFont('helvetica', 'normal')
         doc.text('To,', 14, yPos)
+        yPos += 5
 
         doc.setFont('helvetica', 'bold')
-        doc.text(webClientDisplayName, 22, yPos + 6)
+        const clientHeaderName = clientName || webClientDisplayName
+        doc.text(clientHeaderName, 20, yPos)
+        yPos += 5
 
         doc.setFont('helvetica', 'normal')
-        doc.text(`Date: ${curDate}`, doc.internal.pageSize.getWidth() - 14, yPos, { align: 'right' })
+        doc.setFontSize(9)
+        if (clientContact && clientContact !== clientHeaderName) {
+            doc.text(`Attn: ${clientContact}`, 20, yPos)
+            yPos += 4.5
+        }
+        if (clientAddress) {
+            const splitAddr = doc.splitTextToSize(clientAddress, 110)
+            doc.text(splitAddr, 20, yPos)
+            yPos += (splitAddr.length * 4.5)
+        }
+        const clientLocPDF = [clientCity, clientState].filter(Boolean).join(', ')
+        if (clientLocPDF) {
+            doc.text(clientLocPDF, 20, yPos)
+            yPos += 4.5
+        }
+        if (clientGst) {
+            doc.text(`GSTIN: ${clientGst}`, 20, yPos)
+            yPos += 4.5
+        }
+        const clientContactLinePDF = [clientMobile, clientEmail].filter(Boolean).join(' | ')
+        if (clientContactLinePDF) {
+            doc.text(clientContactLinePDF, 20, yPos)
+            yPos += 4.5
+        }
 
-        yPos += 15
+        // Date right aligned
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.text(`Date: ${curDate}`, doc.internal.pageSize.getWidth() - 14, startYForHeader, { align: 'right' })
+
+        yPos += 4
         doc.setFontSize(10)
         doc.setFont('helvetica', 'bold')
         doc.text(`Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}`, 14, yPos)
-        
-        doc.setFont('helvetica', 'normal')
-        if (event.venue_name || city) {
-            doc.text(`Venue : ${[event.venue_name, city, event.venue_zipcode].filter(Boolean).join(', ')}`, 14, yPos + 6)
-            yPos += 16
+        yPos += 6
+
+        const venuePartsPDF = [
+            venueName,
+            fullAddress,
+            [city, state, venueZipcode ? `PIN: ${venueZipcode}` : ''].filter(Boolean).join(', ')
+        ].filter(Boolean)
+
+        if (venuePartsPDF.length > 0) {
+            doc.setFont('helvetica', 'bold')
+            doc.text('Venue :', 14, yPos)
+            doc.setFont('helvetica', 'normal')
+            const venueLines = doc.splitTextToSize(venuePartsPDF.join(', '), doc.internal.pageSize.getWidth() - 44)
+            doc.text(venueLines, 30, yPos)
+            yPos += (venueLines.length * 5) + 6
         } else {
-            yPos += 10
+            yPos += 6
         }
 
         // 3. Render Tables natively using autoTable
@@ -914,6 +976,28 @@ export default function QuotationPage() {
         }
 
         // 2. Header Table (To Client / Date)
+        const clientCellChildren: Paragraph[] = [
+            new Paragraph({ children: [new TextRun("To,")] }),
+            new Paragraph({ children: [new TextRun({ text: clientName || clientDisplayName, bold: true })] }),
+        ]
+        if (clientContact && clientContact !== (clientName || clientDisplayName)) {
+            clientCellChildren.push(new Paragraph({ children: [new TextRun({ text: `Attn: ${clientContact}`, color: "555555" })] }))
+        }
+        if (clientAddress) {
+            clientCellChildren.push(new Paragraph({ children: [new TextRun(clientAddress)] }))
+        }
+        const clientLocDocx = [clientCity, clientState].filter(Boolean).join(', ')
+        if (clientLocDocx) {
+            clientCellChildren.push(new Paragraph({ children: [new TextRun(clientLocDocx)] }))
+        }
+        if (clientGst) {
+            clientCellChildren.push(new Paragraph({ children: [new TextRun({ text: `GSTIN: ${clientGst}`, size: 18, color: "666666" })] }))
+        }
+        const clientContactLineDocx = [clientMobile, clientEmail].filter(Boolean).join(' | ')
+        if (clientContactLineDocx) {
+            clientCellChildren.push(new Paragraph({ children: [new TextRun({ text: clientContactLineDocx, size: 18, color: "777777" })] }))
+        }
+
         docChildren.push(
             new Table({
                 width: { size: 9000, type: WidthType.DXA },
@@ -925,10 +1009,7 @@ export default function QuotationPage() {
                             new TableCell({
                                 borders: noBorder,
                                 width: { size: 5400, type: WidthType.DXA },
-                                children: [
-                                    new Paragraph({ children: [new TextRun("To,")] }),
-                                    new Paragraph({ children: [new TextRun({ text: clientDisplayName, bold: true })] }),
-                                ]
+                                children: clientCellChildren
                             }),
                             new TableCell({
                                 borders: noBorder,
@@ -946,12 +1027,31 @@ export default function QuotationPage() {
         // 3. Event Date
         docChildren.push(
             new Paragraph({
-                spacing: { before: 200, after: 200 },
+                spacing: { before: 200, after: 100 },
                 children: [
                     new TextRun({ text: `Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}`, bold: true })
                 ]
             })
         )
+
+        // 3b. Full Venue Address
+        const venuePartsDocx = [
+            venueName,
+            fullAddress,
+            [city, state, venueZipcode ? `PIN: ${venueZipcode}` : ''].filter(Boolean).join(', ')
+        ].filter(Boolean)
+
+        if (venuePartsDocx.length > 0) {
+            docChildren.push(
+                new Paragraph({
+                    spacing: { after: 250 },
+                    children: [
+                        new TextRun({ text: "Venue : ", bold: true }),
+                        new TextRun({ text: venuePartsDocx.join(', ') })
+                    ]
+                })
+            )
+        }
 
         // 4. Selections
         selections.forEach((sel) => {
@@ -1596,20 +1696,59 @@ export default function QuotationPage() {
 
                         {/* TO & DATE */}
                         <div className="flex justify-between items-start mb-6 text-sm">
-                            <div>
-                                <p>To,</p>
-                                <p className="ml-4 font-bold">{webClientDisplayName}</p>
+                            <div className="space-y-0.5">
+                                <p className="text-gray-900 font-bold">To,</p>
+                                <p className="ml-4 font-bold text-base text-gray-900">{clientName || webClientDisplayName}</p>
+                                {clientContact && clientContact !== (clientName || webClientDisplayName) && (
+                                    <p className="ml-4 font-semibold text-gray-700">Attn: {clientContact}</p>
+                                )}
+                                {clientAddress && (
+                                    <p className="ml-4 font-normal text-gray-800 whitespace-pre-line leading-relaxed">{clientAddress}</p>
+                                )}
+                                {(clientCity || clientState) && (
+                                    <p className="ml-4 font-normal text-gray-800">{[clientCity, clientState].filter(Boolean).join(', ')}</p>
+                                )}
+                                {clientGst && (
+                                    <p className="ml-4 font-normal text-gray-600 text-xs">GSTIN: {clientGst}</p>
+                                )}
+                                {(clientMobile || clientEmail) && (
+                                    <p className="ml-4 font-normal text-gray-500 text-xs">{[clientMobile, clientEmail].filter(Boolean).join(' | ')}</p>
+                                )}
                             </div>
-                            <div>
-                                <p>Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')}</p>
+                            <div className="text-right">
+                                <p className="font-bold text-gray-900">Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')}</p>
                             </div>
                         </div>
 
                         {/* EVENT DATES & VENUE */}
-                        <div className="mb-4 text-sm font-bold">
-                            <p>Event Date : {new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')} {days > 1 ? 'to ' + new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : ''}</p>
-                            {(event.venue_name || city) && (
-                                <p className="mt-1 font-normal">Venue : {[event.venue_name, city, event.venue_zipcode].filter(Boolean).join(', ')}</p>
+                        <div className="mb-6 p-4 rounded-lg bg-stone-50 border border-stone-200 text-sm">
+                            <div className="flex flex-col sm:flex-row sm:items-baseline gap-2 mb-2 font-bold text-stone-900">
+                                <span>Event Date :</span>
+                                <span className="font-extrabold text-amber-900">
+                                    {new Date(event.event_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')} 
+                                    {days > 1 ? ' to ' + new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : ''}
+                                    {days > 1 ? ` (${days} Days)` : ''}
+                                </span>
+                            </div>
+                            
+                            {(venueName || fullAddress || city || state || venueZipcode) && (
+                                <div className="border-t border-stone-200 pt-2 flex items-start gap-2">
+                                    <span className="font-bold text-stone-900 shrink-0">Venue :</span>
+                                    <div className="font-normal text-stone-800 leading-relaxed">
+                                        {venueName && <p className="font-bold text-stone-900">{venueName}</p>}
+                                        {fullAddress && <p className="whitespace-pre-line">{fullAddress}</p>}
+                                        {([city, state, venueZipcode ? `PIN: ${venueZipcode}` : ''].filter(Boolean).length > 0) && (
+                                            <p>{[city, state, venueZipcode ? `PIN: ${venueZipcode}` : ''].filter(Boolean).join(', ')}</p>
+                                        )}
+                                        {googleMapsLink && (
+                                            <p className="pt-1 print:hidden">
+                                                <a href={googleMapsLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline font-semibold inline-flex items-center gap-1 hover:text-blue-800">
+                                                    📍 View on Google Maps ↗
+                                                </a>
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
                             )}
                         </div>
 
@@ -1888,6 +2027,12 @@ export default function QuotationPage() {
                                         <div><label className={labelClass}>Contact Person</label><input className={inputClass} value={clientContact} onChange={e => { setClientContact(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                         <div><label className={labelClass}>Mobile</label><input className={inputClass} value={clientMobile} onChange={e => { setClientMobile(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                         <div><label className={labelClass}>Email</label><input className={inputClass} value={clientEmail} onChange={e => { setClientEmail(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                        <div className="col-span-2">
+                                            <label className={labelClass}>Client Street / Office Address</label>
+                                            <textarea className={`${inputClass} h-16`} value={clientAddress} placeholder="Street address, building, suite..." onChange={e => { setClientAddress(e.target.value); setHasUnsavedChanges(true) }} />
+                                        </div>
+                                        <div><label className={labelClass}>Client City</label><input className={inputClass} value={clientCity} placeholder="e.g. Bangalore" onChange={e => { setClientCity(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                        <div><label className={labelClass}>Client State</label><input className={inputClass} value={clientState} placeholder="e.g. Karnataka" onChange={e => { setClientState(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     </div>
                                 </div>
 
@@ -1934,7 +2079,7 @@ export default function QuotationPage() {
                                 <div>
                                     <label className={labelClass}>Google Maps Link</label>
                                     <input
-                                        className={`${inputClass} text - blue - 600 underline`}
+                                        className={`${inputClass} text-blue-600 underline`}
                                         value={googleMapsLink}
                                         onChange={e => { setGoogleMapsLink(e.target.value); setHasUnsavedChanges(true) }}
                                         placeholder="Paste maps link..."
@@ -1945,11 +2090,12 @@ export default function QuotationPage() {
                                     <EventMap onLocationSelect={handleMapSelect} />
                                 </div>
 
-                                <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text - lg`} value={venueName} onChange={e => { setVenueName(e.target.value); setHasUnsavedChanges(true) }} /></div>
-                                <div><label className={labelClass}>Address</label><textarea className={`${inputClass} h - 20`} value={fullAddress} onChange={e => { setFullAddress(e.target.value); setHasUnsavedChanges(true) }} /></div>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text-lg`} value={venueName} onChange={e => { setVenueName(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                <div><label className={labelClass}>Venue Address (Street / Landmark)</label><textarea className={`${inputClass} h-20`} value={fullAddress} onChange={e => { setFullAddress(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                <div className="grid grid-cols-3 gap-3">
                                     <div><label className={labelClass}>City</label><input className={inputClass} value={city} onChange={e => { setCity(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     <div><label className={labelClass}>State</label><input className={inputClass} value={state} onChange={e => { setState(e.target.value); setHasUnsavedChanges(true) }} /></div>
+                                    <div><label className={labelClass}>PIN / Postal Code</label><input className={inputClass} value={venueZipcode} placeholder="e.g. 560001" onChange={e => { setVenueZipcode(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                 </div>
                             </div>
                         </div>
