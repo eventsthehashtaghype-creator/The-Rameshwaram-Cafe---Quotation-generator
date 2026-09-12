@@ -15,6 +15,7 @@ import dynamic from 'next/dynamic'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, BorderStyle, WidthType, AlignmentType, ImageRun, TableLayoutType } from 'docx'
+import { isEventClosed } from '@/app/lib/eventStatus'
 
 // Load map dynamically
 const EventMap = dynamic(() => import('../../components/EventMap'), {
@@ -36,6 +37,7 @@ export default function QuotationPage() {
     // --- LOCK & EDIT WORKFLOW STATE ---
     const [isQuoteLocked, setIsQuoteLocked] = useState(false)
     const [isMenuLocked, setIsMenuLocked] = useState(false)
+    const [isEventConcluded, setIsEventConcluded] = useState(false)
     const [showEditReasonModal, setShowEditReasonModal] = useState(false)
     const [editReason, setEditReason] = useState('')
 
@@ -104,6 +106,22 @@ export default function QuotationPage() {
         { id: 't7', text: "Service Time 3:30 Hrs Extra Hour Services is Applicable", selected: true }
     ]
     const [terms, setTerms] = useState<{ id: string, text: string, selected: boolean }[]>([])
+
+    // Annexure C state
+    interface AnnexureCRow {
+        id: string
+        meal: string
+        timings: string
+        charges: string
+    }
+    const defaultAnnexureCRows: AnnexureCRow[] = [
+        { id: 'ac1', meal: 'Breakfast', timings: '7:00 AM - 11:00 AM', charges: '50,000' },
+        { id: 'ac2', meal: 'Lunch', timings: '12:00 PM - 3:00 PM', charges: '50,000' },
+        { id: 'ac3', meal: 'High Tea', timings: '4:00 PM - 7:00 PM', charges: '50,000' },
+        { id: 'ac4', meal: 'Dinner', timings: '7:00 PM - 11:00 PM', charges: '50,000' }
+    ]
+    const [includeAnnexureC, setIncludeAnnexureC] = useState<boolean>(true)
+    const [annexureCRows, setAnnexureCRows] = useState<AnnexureCRow[]>(defaultAnnexureCRows)
 
     useEffect(() => {
         if (!id) {
@@ -196,7 +214,9 @@ export default function QuotationPage() {
                 setPocEmail(eventData.poc_email || '')
 
                 // Lock States
-                const isLocked = eventData.status === 'sent' || eventData.quote_status === 'submitted' || eventData.quote_status === 'sent' || eventData.quote_submitted === true
+                const closed = isEventClosed(eventData)
+                setIsEventConcluded(closed)
+                const isLocked = closed || eventData.status === 'sent' || eventData.quote_status === 'submitted' || eventData.quote_status === 'sent' || eventData.quote_submitted === true
                 setIsQuoteLocked(isLocked)
                 setIsMenuLocked(eventData.menu_locked === true)
 
@@ -205,6 +225,19 @@ export default function QuotationPage() {
                     setTerms(eventData.terms_and_conditions)
                 } else {
                     setTerms(defaultTerms)
+                }
+
+                // Init Annexure C gracefully from DB or Defaults
+                if (eventData.annexure_c && typeof eventData.annexure_c === 'object') {
+                    setIncludeAnnexureC(eventData.annexure_c.enabled !== false)
+                    if (Array.isArray(eventData.annexure_c.rows)) {
+                        setAnnexureCRows(eventData.annexure_c.rows)
+                    } else {
+                        setAnnexureCRows(defaultAnnexureCRows)
+                    }
+                } else {
+                    setIncludeAnnexureC(true)
+                    setAnnexureCRows(defaultAnnexureCRows)
                 }
 
                 // Populate Client State
@@ -387,6 +420,10 @@ export default function QuotationPage() {
                 order_index: s.order_index || idx + 1,
             })),
             terms: terms,
+            annexure_c: {
+                enabled: includeAnnexureC,
+                rows: annexureCRows
+            },
             financials: {
                 grandTotal: subtotal,
                 gst: gstVal,
@@ -429,7 +466,11 @@ export default function QuotationPage() {
                 poc_name: pocName,
                 poc_mobile: pocMobile,
                 poc_email: pocEmail,
-                terms_and_conditions: terms
+                terms_and_conditions: terms,
+                annexure_c: {
+                    enabled: includeAnnexureC,
+                    rows: annexureCRows
+                }
             }).eq('id', id)
 
             if (eventError) {
@@ -596,10 +637,10 @@ export default function QuotationPage() {
     const gst = grandTotal * 0.18
     const finalAmount = grandTotal + gst
 
-    // PRINT PDF (Replaced with native jsPDF implementation)
+    // PRINT PDF (Native jsPDF implementation with optimized layout and pagination)
     const handleDownloadPDF = async () => {
         const doc = new jsPDF()
-        let yPos = 20
+        let yPos = 14
 
         // 1. Logo Fetching
         try {
@@ -611,7 +652,7 @@ export default function QuotationPage() {
                     const img = new Image()
                     img.onload = () => {
                         const canvas = document.createElement('canvas')
-                        const MAX_WIDTH = 400
+                        const MAX_WIDTH = 300
                         let width = img.width
                         let height = img.height
 
@@ -627,7 +668,7 @@ export default function QuotationPage() {
                             ctx.fillStyle = '#FFFFFF'
                             ctx.fillRect(0, 0, width, height)
                             ctx.drawImage(img, 0, 0, width, height)
-                            resolve(canvas.toDataURL('image/jpeg', 0.8)) // Compress to JPEG for smaller PDF size
+                            resolve(canvas.toDataURL('image/jpeg', 0.8))
                         } else {
                             resolve('')
                         }
@@ -637,15 +678,15 @@ export default function QuotationPage() {
                 })
 
                 if (base64Logo) {
-                    // Add Logo: Scale with bounding box to maintain exact ratio matching "w-56 object-contain"
-                    const reqWidth = 60
+                    // Add Logo: Scale cleanly to fit professionally without taking half the page
+                    const reqWidth = 38
                     const imgProps = doc.getImageProperties(base64Logo)
                     const ratio = imgProps.height / imgProps.width
                     const reqHeight = reqWidth * ratio
 
                     const pageWidth = doc.internal.pageSize.getWidth()
                     doc.addImage(base64Logo, 'JPEG', (pageWidth - reqWidth) / 2, yPos, reqWidth, reqHeight)
-                    yPos += reqHeight + 15
+                    yPos += reqHeight + 7
                 }
             }
         } catch (error) {
@@ -658,52 +699,52 @@ export default function QuotationPage() {
         const endDateStr = new Date(event.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
 
         const startYForHeader = yPos
-        doc.setFontSize(11)
+        doc.setFontSize(10.5)
         doc.setFont('helvetica', 'normal')
         doc.text('To,', 14, yPos)
-        yPos += 5
+        yPos += 4.5
 
         doc.setFont('helvetica', 'bold')
         const clientHeaderName = clientName || webClientDisplayName
         doc.text(clientHeaderName, 20, yPos)
-        yPos += 5
+        yPos += 4.5
 
         doc.setFont('helvetica', 'normal')
-        doc.setFontSize(9)
+        doc.setFontSize(8.5)
         if (clientContact && clientContact !== clientHeaderName) {
             doc.text(`Attn: ${clientContact}`, 20, yPos)
-            yPos += 4.5
+            yPos += 4
         }
         if (clientAddress) {
             const splitAddr = doc.splitTextToSize(clientAddress, 110)
             doc.text(splitAddr, 20, yPos)
-            yPos += (splitAddr.length * 4.5)
+            yPos += (splitAddr.length * 4)
         }
         const clientLocPDF = [clientCity, clientState].filter(Boolean).join(', ')
         if (clientLocPDF) {
             doc.text(clientLocPDF, 20, yPos)
-            yPos += 4.5
+            yPos += 4
         }
         if (clientGst) {
             doc.text(`GSTIN: ${clientGst}`, 20, yPos)
-            yPos += 4.5
+            yPos += 4
         }
         const clientContactLinePDF = [clientMobile, clientEmail].filter(Boolean).join(' | ')
         if (clientContactLinePDF) {
             doc.text(clientContactLinePDF, 20, yPos)
-            yPos += 4.5
+            yPos += 4
         }
 
         // Date right aligned
         doc.setFont('helvetica', 'normal')
-        doc.setFontSize(10)
+        doc.setFontSize(9.5)
         doc.text(`Date: ${curDate}`, doc.internal.pageSize.getWidth() - 14, startYForHeader, { align: 'right' })
 
-        yPos += 4
-        doc.setFontSize(10)
+        yPos += 3
+        doc.setFontSize(9.5)
         doc.setFont('helvetica', 'bold')
         doc.text(`Event Date : ${eventDateStr} ${days > 1 ? 'to ' + endDateStr : ''}`, 14, yPos)
-        yPos += 6
+        yPos += 5
 
         const venuePartsPDF = [
             venueName,
@@ -717,9 +758,9 @@ export default function QuotationPage() {
             doc.setFont('helvetica', 'normal')
             const venueLines = doc.splitTextToSize(venuePartsPDF.join(', '), doc.internal.pageSize.getWidth() - 44)
             doc.text(venueLines, 30, yPos)
-            yPos += (venueLines.length * 5) + 6
+            yPos += (venueLines.length * 4.5) + 5
         } else {
-            yPos += 6
+            yPos += 5
         }
 
         // 3. Render Tables natively using autoTable
@@ -734,58 +775,78 @@ export default function QuotationPage() {
             let contentBody: any[] = []
 
             Object.entries(groupedItems).forEach(([station, items], index) => {
-                const topBorder = index === 0 ? 0 : 0.1;
+                const topBorder = index === 0 ? 0 : 0.1
 
-                if (station !== 'OTHER') {
-                    contentBody.push([
-                        { content: station.toUpperCase(), styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 4, right: 4 }, fontSize: 10, halign: 'left', lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
-                    ])
-                    const itemsStr = items.join('\n')
-                    contentBody.push([
-                        { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: 0, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
-                    ])
-                } else {
-                    contentBody.push([
-                        { content: 'CUSTOM REQUESTS', styles: { fontStyle: 'bold', textColor: [180, 83, 9], cellPadding: { top: 4, bottom: 1, left: 4, right: 4 }, fontSize: 10, halign: 'left', lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
-                    ])
-                    const itemsStr = items.join('\n')
-                    contentBody.push([
-                        { content: itemsStr, styles: { fontStyle: 'normal', cellPadding: { top: 1, bottom: 4, left: 4, right: 4 }, halign: 'left', fontSize: 10, lineWidth: { top: 0, right: 0, bottom: 0, left: 0.1 }, lineColor: [0, 0, 0] } }
-                    ])
-                }
+                const stationLabel = station !== 'OTHER' ? station.toUpperCase() : 'CUSTOM REQUESTS'
+                contentBody.push([
+                    {
+                        content: stationLabel,
+                        styles: {
+                            fontStyle: 'bold',
+                            textColor: [180, 83, 9],
+                            cellPadding: { top: 2.5, bottom: 0.5, left: 3, right: 3 },
+                            fontSize: 8.5,
+                            halign: 'left',
+                            lineWidth: { top: topBorder, right: 0, bottom: 0, left: 0.1 },
+                            lineColor: [0, 0, 0]
+                        }
+                    }
+                ])
+                const itemsStr = items.join('\n')
+                contentBody.push([
+                    {
+                        content: itemsStr,
+                        styles: {
+                            fontStyle: 'normal',
+                            cellPadding: { top: 0.5, bottom: 2.5, left: 3, right: 3 },
+                            halign: 'left',
+                            fontSize: 8.5,
+                            lineWidth: { top: 0, right: 0, bottom: 0, left: 0.1 },
+                            lineColor: [0, 0, 0]
+                        }
+                    }
+                ])
             })
 
             if (contentBody.length > 0) {
-                const lastRowStyles = contentBody[contentBody.length - 1][0].styles;
-                lastRowStyles.lineWidth.bottom = 0.1;
+                const lastRowStyles = contentBody[contentBody.length - 1][0].styles
+                lastRowStyles.lineWidth.bottom = 0.1
 
                 contentBody[0].push({
                     content: `Rs. ${((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')} /-`,
                     rowSpan: contentBody.length,
-                    styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] }
+                    styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 10, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] }
                 })
             } else {
                 contentBody.push([
-                    { content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: 4, lineWidth: { top: 0, right: 0, bottom: 0.1, left: 0 }, lineColor: [0, 0, 0] } },
-                    { content: `Rs. ${((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 11, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] } }
+                    { content: 'No items selected.', styles: { fontStyle: 'italic', textColor: [220, 38, 38], cellPadding: 3, lineWidth: { top: 0, right: 0, bottom: 0.1, left: 0 }, lineColor: [0, 0, 0] } },
+                    { content: `Rs. ${((sel.price_per_plate || 0) * (sel.pax || 0)).toLocaleString('en-IN')} /-`, styles: { halign: 'center', valign: 'middle', fontStyle: 'bold', fontSize: 10, lineWidth: { top: 0, right: 0.1, bottom: 0.1, left: 0.1 }, lineColor: [0, 0, 0] } }
                 ])
             }
 
-            if (yPos > doc.internal.pageSize.getHeight() - 40) {
-                doc.addPage();
-                yPos = 20;
+            // Estimate table height: Header (7mm) + ~4.2mm per station/item row
+            const estTableHeight = 7 + (contentBody.length * 4.2)
+            const pageHeight = doc.internal.pageSize.getHeight()
+            const spaceRemaining = pageHeight - yPos - 15
+
+            // Avoid orphan headers: if table can't fit on this page, push entire table to next page!
+            if (spaceRemaining < 35 || (contentBody.length <= 14 && spaceRemaining < estTableHeight)) {
+                doc.addPage()
+                yPos = 14
             }
 
             autoTable(doc, {
-                startY: yPos + 2,
+                startY: yPos + 1.5,
                 head: [[{ content: `${sel.category_title} ( ${sel.pax} PAX )`, colSpan: 2 }]],
                 body: contentBody,
                 theme: 'plain',
                 tableLineColor: [0, 0, 0],
                 tableLineWidth: 0,
+                pageBreak: 'avoid',
+                showHead: 'firstPage',
                 styles: {
                     font: 'helvetica',
-                    fontSize: 10,
+                    fontSize: 8.5,
                     textColor: [0, 0, 0],
                     lineWidth: 0,
                     lineColor: [0, 0, 0]
@@ -796,7 +857,7 @@ export default function QuotationPage() {
                     fontStyle: 'bold',
                     halign: 'center',
                     valign: 'middle',
-                    cellPadding: 3,
+                    cellPadding: 2.5,
                     lineWidth: 0.1,
                     lineColor: [0, 0, 0]
                 },
@@ -805,56 +866,56 @@ export default function QuotationPage() {
                     valign: 'top',
                 },
                 columnStyles: {
-                    0: { cellWidth: 135 },
-                    1: { cellWidth: 45 }
+                    0: { cellWidth: 138 },
+                    1: { cellWidth: 44 }
                 },
-                margin: { left: 14, right: 14 },
+                margin: { left: 14, right: 14, bottom: 15 },
                 didDrawPage: (data) => {
                     yPos = data.cursor ? data.cursor.y : yPos
                 }
             })
 
-            yPos += 5
+            yPos += 4
         })
 
         // 4. Notes Section
-        if (yPos > doc.internal.pageSize.getHeight() - 60) {
+        const activeTerms = terms.filter(t => t.selected)
+        const estNotesHeight = 12 + (activeTerms.length * 4.5)
+        if (doc.internal.pageSize.getHeight() - yPos - 15 < Math.min(estNotesHeight, 45)) {
             doc.addPage()
-            yPos = 20
+            yPos = 14
         }
-        yPos += 5
-        doc.setFontSize(11)
+        yPos += 4
+        doc.setFontSize(10)
         doc.setFont('helvetica', 'bold')
         doc.text('NOTE:', 14, yPos)
-        yPos += 6
+        yPos += 5
 
-        doc.setFontSize(10)
+        doc.setFontSize(8.5)
         doc.setFont('helvetica', 'normal')
 
-        const activeTerms = terms.filter(t => t.selected)
         if (activeTerms.length === 0) {
             doc.text("No additional terms.", 20, yPos)
-            yPos += 5
+            yPos += 4.5
         } else {
             activeTerms.forEach((term, idx) => {
                 doc.text(`${idx + 1}. ${term.text}`, 20, yPos)
-                yPos += 5
+                yPos += 4.5
             })
         }
 
-        if (yPos > doc.internal.pageSize.getHeight() - 40) {
-            doc.addPage()
-            yPos = 20
-        }
-
         // 5. Bank Details Section
-        yPos += 5
-        doc.setFontSize(11)
+        if (doc.internal.pageSize.getHeight() - yPos - 15 < 35) {
+            doc.addPage()
+            yPos = 14
+        }
+        yPos += 4
+        doc.setFontSize(10)
         doc.setFont('helvetica', 'bold')
         doc.text('Bank Details:', 14, yPos)
 
         autoTable(doc, {
-            startY: yPos + 3,
+            startY: yPos + 2,
             body: [
                 ["A/c Holder's Name", appSettings?.bank_account_name || "THE RAMESHWARAM CAFE"],
                 ["Bank Name", appSettings?.bank_name || "HDFC BANK LTD"],
@@ -863,67 +924,70 @@ export default function QuotationPage() {
                 ["Branch", appSettings?.bank_branch || "VASANT VIHAR"]
             ],
             theme: 'grid',
+            pageBreak: 'avoid',
             styles: {
                 font: 'helvetica',
-                fontSize: 10,
+                fontSize: 8.5,
+                cellPadding: 2,
                 textColor: [0, 0, 0],
                 lineColor: [0, 0, 0],
                 lineWidth: 0.1,
             },
             columnStyles: {
                 0: { cellWidth: 40, halign: 'left' },
-                1: { cellWidth: 50, halign: 'left', fontStyle: 'bold' } // Uppercase already applied in strings
+                1: { cellWidth: 50, halign: 'left', fontStyle: 'bold' }
             },
-            margin: { left: 14 },
+            margin: { left: 14, bottom: 15 },
             didDrawPage: (data) => {
                 yPos = data.cursor ? data.cursor.y : yPos
             }
         })
 
-        if (yPos > doc.internal.pageSize.getHeight() - 60) {
-            doc.addPage()
-            yPos = 20
+        // 6. Annexure C
+        if (includeAnnexureC && annexureCRows.length > 0) {
+            const estAnnexureHeight = 12 + (annexureCRows.length * 6)
+            if (doc.internal.pageSize.getHeight() - yPos - 15 < estAnnexureHeight) {
+                doc.addPage()
+                yPos = 14
+            }
+            yPos += 6
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.setTextColor(65, 122, 185)
+            doc.text('Annexure C - Event Timings & Extension Charges', 14, yPos)
+            doc.setTextColor(0, 0, 0)
+
+            autoTable(doc, {
+                startY: yPos + 2.5,
+                head: [['Meal Type', 'Timings', 'Extension Charges (Rs/Hour)']],
+                body: annexureCRows.map(r => [r.meal, r.timings, r.charges]),
+                theme: 'grid',
+                pageBreak: 'avoid',
+                styles: {
+                    font: 'helvetica',
+                    fontSize: 8.5,
+                    cellPadding: 2,
+                    textColor: [0, 0, 0],
+                    lineColor: [0, 0, 0],
+                    lineWidth: 0.1,
+                    halign: 'left'
+                },
+                headStyles: {
+                    fillColor: [255, 255, 255],
+                    textColor: [0, 0, 0],
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 50 },
+                    1: { cellWidth: 60 },
+                    2: { cellWidth: 50 }
+                },
+                margin: { left: 14, bottom: 15 },
+                didDrawPage: (data) => {
+                    yPos = data.cursor ? data.cursor.y : yPos
+                }
+            })
         }
-        yPos += 10
-        doc.setFontSize(11)
-        doc.setFont('helvetica', 'bold')
-        doc.setTextColor(65, 122, 185)
-        doc.text('Annexure C - Event Timings & Extension Charges', 14, yPos)
-        doc.setTextColor(0, 0, 0)
-
-        autoTable(doc, {
-            startY: yPos + 3,
-            head: [['Meal Type', 'Timings', 'Extension Charges (Rs/Hour)']],
-            body: [
-                ['Breakfast', '7:00 AM - 11:00 AM', '50,000'],
-                ['Lunch', '12:00 PM - 3:00 PM', '50,000'],
-                ['High Tea', '4:00 PM - 7:00 PM', '50,000'],
-                ['Dinner', '7:00 PM - 11:00 PM', '50,000']
-            ],
-            theme: 'grid',
-            styles: {
-                font: 'helvetica',
-                fontSize: 10,
-                textColor: [0, 0, 0],
-                lineColor: [0, 0, 0],
-                lineWidth: 0.1,
-                halign: 'left'
-            },
-            headStyles: {
-                fillColor: [255, 255, 255],
-                textColor: [0, 0, 0],
-                fontStyle: 'bold'
-            },
-            columnStyles: {
-                0: { cellWidth: 50 },
-                1: { cellWidth: 60 },
-                2: { cellWidth: 50 }
-            },
-            margin: { left: 14 },
-            didDrawPage: (data) => {
-                yPos = data.cursor ? data.cursor.y : yPos
-            }
-        })
 
         doc.save(`Quotation_${event.event_code}.pdf`)
     }
@@ -1165,33 +1229,34 @@ export default function QuotationPage() {
         )
 
         // 7. Annexure C
-        docChildren.push(
-            new Paragraph({ spacing: { before: 400, after: 100 }, children: [new TextRun({ text: "Annexure C - Event Timings & Extension Charges", bold: true, color: "417ab9" })] })
-        )
+        if (includeAnnexureC && annexureCRows.length > 0) {
+            docChildren.push(
+                new Paragraph({ spacing: { before: 400, after: 100 }, children: [new TextRun({ text: "Annexure C - Event Timings & Extension Charges", bold: true, color: "417ab9" })] })
+            )
 
-        const makeAnnexureRow = (meal: string, timing: string, charges: string, isHeader = false) => {
-            return new TableRow({
-                children: [
-                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: meal, bold: isHeader })] })] }),
-                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: timing, bold: isHeader })] })] }),
-                    new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: charges, bold: isHeader })] })] }),
-                ]
-            })
+            const makeAnnexureRow = (meal: string, timing: string, charges: string, isHeader = false) => {
+                return new TableRow({
+                    children: [
+                        new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: meal, bold: isHeader })] })] }),
+                        new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: timing, bold: isHeader })] })] }),
+                        new TableCell({ margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: charges, bold: isHeader })] })] }),
+                    ]
+                })
+            }
+
+            const annexureDocxRows = [
+                makeAnnexureRow("Meal Type", "Timings", "Extension Charges (Rs/Hour)", true),
+                ...annexureCRows.map(r => makeAnnexureRow(r.meal, r.timings, r.charges))
+            ]
+
+            docChildren.push(
+                new Table({
+                    width: { size: 9000, type: WidthType.DXA },
+                    columnWidths: [3000, 3000, 3000],
+                    rows: annexureDocxRows
+                })
+            )
         }
-
-        docChildren.push(
-            new Table({
-                width: { size: 9000, type: WidthType.DXA },
-                columnWidths: [3000, 3000, 3000],
-                rows: [
-                    makeAnnexureRow("Meal Type", "Timings", "Extension Charges (Rs/Hour)", true),
-                    makeAnnexureRow("Breakfast", "7:00 AM - 11:00 AM", "50,000"),
-                    makeAnnexureRow("Lunch", "12:00 PM - 3:00 PM", "50,000"),
-                    makeAnnexureRow("High Tea", "4:00 PM - 7:00 PM", "50,000"),
-                    makeAnnexureRow("Dinner", "7:00 PM - 11:00 PM", "50,000")
-                ]
-            })
-        )
 
         // Generate and Download
         const docx = new Document({
@@ -1246,6 +1311,10 @@ export default function QuotationPage() {
     }
 
     const handleUnlockForEdit = async () => {
+        if (isEventConcluded) {
+            alert("Cannot edit quotation: Event has closed and is permanently archived.")
+            return
+        }
         const adminName = (typeof window !== 'undefined' && localStorage.getItem('admin_login_name')) || 'Admin'
         const districtState = [city, state].filter(Boolean).join(', ') || 'Karnataka'
 
@@ -1278,6 +1347,10 @@ export default function QuotationPage() {
     }
 
     const handleToggleLockMenu = async () => {
+        if (isEventConcluded) {
+            alert("Event is closed and archived. Menu cannot be modified.")
+            return
+        }
         const nextState = !isMenuLocked
         await supabase.from('events').update({ menu_locked: nextState }).eq('id', id)
         setIsMenuLocked(nextState)
@@ -1290,9 +1363,10 @@ export default function QuotationPage() {
             districtState: [city, state].filter(Boolean).join(', ') || 'Karnataka',
             eventStartDate: startDate,
             eventCode: event.event_code || 'EVENT',
+            details: nextState ? 'Admin locked menu editing for client' : 'Admin unlocked menu editing to allow client edits'
         })
 
-        alert(nextState ? "🔒 Menu locked before auto-lock." : "🔓 Menu unlocked.")
+        alert(nextState ? "🔒 Menu locked: Editing is disabled for the client." : "🔓 Menu unlocked: The client is now allowed to edit the menu.")
     }
 
     if (loading) return <div className="min-h-screen flex items-center justify-center font-bold text-stone-400">Loading Quote...</div>
@@ -1314,26 +1388,36 @@ export default function QuotationPage() {
         <div className="min-h-screen bg-gray-100 font-sans text-black pb-20 print:bg-white print:pb-0">
 
             {/* NAVBAR */}
+            {/* NAVBAR */}
             {!isClientPreview ? (
-                <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap justify-between items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm gap-3">
-                    <div className="flex items-center gap-4">
-                        <Link href="/" className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200 transition">←</Link>
-                        <div>
-                            <h1 className="text-xl font-black">{event.event_code}</h1>
-                            <p className="text-xs font-bold text-gray-500 uppercase">{event.clients?.entity_name}</p>
+                <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4 flex flex-col lg:flex-row lg:justify-between lg:items-center sticky top-0 z-50 print:hidden bg-opacity-90 backdrop-blur shadow-sm gap-3">
+                    <div className="flex items-center justify-between w-full lg:w-auto">
+                        <div className="flex items-center gap-3 sm:gap-4">
+                            <Link href="/" className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200 transition shrink-0">←</Link>
+                            <div>
+                                <h1 className="text-lg sm:text-xl font-black leading-tight">{event.event_code}</h1>
+                                <p className="text-[11px] sm:text-xs font-bold text-gray-500 uppercase truncate max-w-[200px] sm:max-w-xs">{event.clients?.entity_name}</p>
+                            </div>
+                        </div>
+
+                        {/* Mobile quick action */}
+                        <div className="flex items-center gap-1.5 lg:hidden">
+                            <button onClick={handleDownloadPDF} className="bg-black text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-gray-800 transition flex items-center gap-1">
+                                <span>🖨️</span> PDF
+                            </button>
                         </div>
                     </div>
 
-                    <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                    <div className="flex overflow-x-auto no-scrollbar bg-gray-100 p-1 rounded-lg gap-1 w-full lg:w-auto">
                         {[
                             { id: 'quote', label: 'Quote' },
                             { id: 'settings', label: 'Settings' },
-                            { id: 'history', label: `Versions & History (${versions.length})` }
+                            { id: 'history', label: `Versions (${versions.length})` }
                         ].map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
-                                className={`px-4 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all ${
+                                className={`px-3 sm:px-4 py-2 rounded-md text-xs font-black uppercase tracking-wide transition-all whitespace-nowrap flex-1 sm:flex-none text-center ${
                                     activeTab === tab.id
                                         ? 'bg-white shadow-sm text-black'
                                         : 'text-gray-400 hover:text-gray-600'
@@ -1344,16 +1428,19 @@ export default function QuotationPage() {
                         ))}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                         {/* Save Revision Button */}
                         <button
-                            onClick={() => openSaveRevisionModal()}
+                            onClick={() => !isEventConcluded && openSaveRevisionModal()}
+                            disabled={isEventConcluded}
                             className={`px-3.5 py-2 rounded text-xs font-bold transition flex items-center gap-1.5 shadow ${
-                                hasUnsavedChanges
-                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
-                                    : 'bg-black text-white hover:bg-gray-800'
+                                isEventConcluded
+                                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
+                                    : hasUnsavedChanges
+                                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
+                                        : 'bg-black text-white hover:bg-gray-800'
                             }`}
-                            title="Save a new version of this quotation with reason notes"
+                            title={isEventConcluded ? "Event closed - no revisions can be saved" : "Save a new version of this quotation with reason notes"}
                         >
                             <span>💾</span> {hasUnsavedChanges ? 'Save Revision *' : 'Save Revision'}
                         </button>
@@ -1363,11 +1450,42 @@ export default function QuotationPage() {
                             <span>🔄</span> Refresh Menu
                         </button>
 
-                        <button onClick={handleToggleLockMenu} className={`px-3 py-2 rounded text-xs font-bold transition flex items-center gap-1.5 ${isMenuLocked ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                            <span>{isMenuLocked ? '🔒' : '🔓'}</span> {isMenuLocked ? 'Menu Locked' : 'Lock Menu'}
-                        </button>
+                        {/* Client Menu Lock / Unlock Toggle Switch */}
+                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 px-2.5 py-1.5 rounded-lg shadow-sm">
+                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
+                                Client Edit:
+                            </span>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={!isMenuLocked}
+                                disabled={isEventConcluded}
+                                onClick={handleToggleLockMenu}
+                                title={isEventConcluded ? "Event is closed" : (isMenuLocked ? "Turn on switch to allow client edits" : "Turn off switch to lock editing to client")}
+                                className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                    isEventConcluded ? 'opacity-50 cursor-not-allowed bg-gray-300' : isMenuLocked ? 'bg-amber-600' : 'bg-emerald-500'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out flex items-center justify-center text-[8px] ${
+                                        isMenuLocked ? 'translate-x-0' : 'translate-x-5'
+                                    }`}
+                                >
+                                    {isMenuLocked ? '🔒' : '🔓'}
+                                </span>
+                            </button>
+                            <span className={`text-[10px] font-black uppercase tracking-wider ${
+                                isEventConcluded ? 'text-gray-400' : isMenuLocked ? 'text-amber-800' : 'text-emerald-700'
+                            }`}>
+                                {isEventConcluded ? 'Closed' : isMenuLocked ? 'Locked' : 'Allowed'}
+                            </span>
+                        </div>
 
-                        {isQuoteLocked ? (
+                        {isEventConcluded ? (
+                            <div className="bg-slate-200 text-slate-600 px-3.5 py-2 rounded text-xs font-bold flex items-center gap-1.5 cursor-not-allowed" title="Event has concluded. Quotation is archived.">
+                                <span>🔒</span> Event Closed
+                            </div>
+                        ) : isQuoteLocked ? (
                             <button onClick={() => setShowEditReasonModal(true)} className="bg-amber-500 text-white hover:bg-amber-600 px-3.5 py-2 rounded text-xs font-bold shadow transition flex items-center gap-1.5">
                                 <span>✏️</span> Edit Quotation
                             </button>
@@ -1380,34 +1498,44 @@ export default function QuotationPage() {
                         <button onClick={handleDownloadMenuSheet} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-2 rounded text-xs font-bold transition flex items-center gap-1.5">
                             <span>📄</span> Word
                         </button>
-                        <button onClick={handleDownloadPDF} className="bg-black text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-gray-800 transition flex items-center gap-1.5">
+                        <button onClick={handleDownloadPDF} className="hidden lg:flex bg-black text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-gray-800 transition items-center gap-1.5">
                             <span>🖨️</span> PDF
                         </button>
                     </div>
                 </div>
             ) : (
-                <div className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden shadow-sm">
+                <div className="bg-white border-b border-gray-200 px-4 sm:px-8 py-4 flex justify-between items-center sticky top-0 z-50 print:hidden shadow-sm">
                     <div className="flex items-center gap-4">
-                        <h1 className="text-xl font-black text-black">Your Quotation</h1>
+                        <h1 className="text-lg sm:text-xl font-black text-black">Your Quotation</h1>
                     </div>
-                    <button onClick={handleDownloadPDF} className="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2">
+                    <button onClick={handleDownloadPDF} className="bg-blue-600 text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2">
                         <span>📥</span> Download PDF
                     </button>
                 </div>
             )}
 
             {/* QUOTE LOCKED BANNER FOR ADMIN */}
-            {!isClientPreview && isQuoteLocked && (
+            {!isClientPreview && (isEventConcluded || isQuoteLocked) && (
                 <div className="max-w-[210mm] mx-auto mt-4 px-4">
-                    <div className="bg-amber-50 border-2 border-amber-300 text-amber-900 px-5 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-2">
-                            <span className="text-base">🔒</span>
-                            <span>Quotation is <strong>LOCKED TO EDIT</strong> (Submitted to Client). Click "Edit Quotation" above if you need to modify details or prices.</span>
+                    {isEventConcluded ? (
+                        <div className="bg-slate-100 border-2 border-slate-300 text-slate-800 px-5 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-sm">
+                            <div className="flex items-center gap-2">
+                                <span className="text-base">🔒</span>
+                                <span>This event is <strong>EVENT CLOSED</strong>. The event date has passed, and both the quotation and menu are permanently archived and uneditable.</span>
+                            </div>
+                            <span className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-[10px] font-black uppercase">Archived</span>
                         </div>
-                        <button onClick={() => setShowEditReasonModal(true)} className="bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-700 transition">
-                            Edit Quotation
-                        </button>
-                    </div>
+                    ) : (
+                        <div className="bg-amber-50 border-2 border-amber-300 text-amber-900 px-5 py-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-sm">
+                            <div className="flex items-center gap-2">
+                                <span className="text-base">🔒</span>
+                                <span>Quotation is <strong>LOCKED TO EDIT</strong> (Submitted to Client). Click "Edit Quotation" above if you need to modify details or prices.</span>
+                            </div>
+                            <button onClick={() => setShowEditReasonModal(true)} className="bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-700 transition">
+                                Edit Quotation
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -1663,14 +1791,14 @@ export default function QuotationPage() {
 
             {/* FLOATING UNSAVED CHANGES BANNER */}
             {hasUnsavedChanges && !isClientPreview && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900/95 backdrop-blur text-white px-6 py-3 rounded-2xl shadow-2xl border border-gray-700 flex items-center gap-4">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900/95 backdrop-blur text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-2xl shadow-2xl border border-gray-700 flex flex-col sm:flex-row items-center gap-3 sm:gap-4 w-[92vw] sm:w-auto max-w-lg text-center sm:text-left">
                     <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
                         <span className="text-xs font-bold">You have unsaved changes in this quotation</span>
                     </div>
                     <button
                         onClick={() => openSaveRevisionModal()}
-                        className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-1.5 rounded-xl text-xs font-black transition shadow flex items-center gap-1.5"
+                        className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-1.5 rounded-xl text-xs font-black transition shadow flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer"
                     >
                         <span>💾</span> Save Revision & Reason
                     </button>
@@ -1957,39 +2085,169 @@ export default function QuotationPage() {
                             </div>
 
                             {/* ANNEXURE C */}
-                            <div className="mt-8">
-                                <p className="mb-2 font-bold text-[#417ab9]">Annexure C - Event Timings & Extension Charges</p>
-                                <table className="border-collapse border border-black text-center text-sm w-[36rem]">
-                                    <thead>
-                                        <tr>
-                                            <td className="border border-black p-1 px-4 text-xs text-left font-bold w-1/3">Meal Type</td>
-                                            <td className="border border-black p-1 px-4 text-xs font-bold w-1/3">Timings</td>
-                                            <td className="border border-black p-1 px-4 text-xs font-bold w-1/3">Extension Charges (₹/Hour)</td>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td className="border border-black p-1 px-4 text-xs text-left">Breakfast</td>
-                                            <td className="border border-black p-1 px-4 text-xs">7:00 AM - 11:00 AM</td>
-                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="border border-black p-1 px-4 text-xs text-left">Lunch</td>
-                                            <td className="border border-black p-1 px-4 text-xs">12:00 PM - 3:00 PM</td>
-                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="border border-black p-1 px-4 text-xs text-left">High Tea</td>
-                                            <td className="border border-black p-1 px-4 text-xs">4:00 PM - 7:00 PM</td>
-                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="border border-black p-1 px-4 text-xs text-left">Dinner</td>
-                                            <td className="border border-black p-1 px-4 text-xs">7:00 PM - 11:00 PM</td>
-                                            <td className="border border-black p-1 px-4 text-xs">50,000</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                            <div className={`mt-8 ${!includeAnnexureC ? 'print:hidden' : ''} ${(!includeAnnexureC && isClientPreview) ? 'hidden' : ''}`}>
+                                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                                    <div className="flex items-center gap-3">
+                                        <p className="font-bold text-[#417ab9] text-base">Annexure C - Event Timings & Extension Charges</p>
+                                        {!isClientPreview && (
+                                            <label className="inline-flex items-center cursor-pointer gap-2 bg-stone-100 hover:bg-stone-200 px-3 py-1 rounded-full text-xs font-semibold text-stone-700 transition print:hidden shadow-sm">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={includeAnnexureC}
+                                                    onChange={(e) => {
+                                                        setIncludeAnnexureC(e.target.checked)
+                                                        setHasUnsavedChanges(true)
+                                                    }}
+                                                    className="w-4 h-4 rounded text-black focus:ring-black cursor-pointer"
+                                                />
+                                                <span>{includeAnnexureC ? 'Included in Quote' : 'Excluded from Quote'}</span>
+                                            </label>
+                                        )}
+                                    </div>
+
+                                    {!isClientPreview && includeAnnexureC && (
+                                        <div className="flex items-center gap-2 print:hidden">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const newRow = {
+                                                        id: 'ac_' + Date.now(),
+                                                        meal: 'Meal Slot',
+                                                        timings: '00:00 - 00:00',
+                                                        charges: '50,000'
+                                                    }
+                                                    setAnnexureCRows([...annexureCRows, newRow])
+                                                    setHasUnsavedChanges(true)
+                                                }}
+                                                className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold px-3 py-1 rounded transition shadow-sm"
+                                            >
+                                                + Add Row
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (confirm("Reset Annexure C to default 4 meals and timings?")) {
+                                                        setAnnexureCRows(defaultAnnexureCRows)
+                                                        setHasUnsavedChanges(true)
+                                                    }
+                                                }}
+                                                className="text-xs text-stone-500 hover:text-black font-semibold px-2 py-1 transition"
+                                                title="Reset to Defaults"
+                                            >
+                                                Reset Defaults
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {!includeAnnexureC ? (
+                                    <div className="p-4 rounded-lg bg-stone-50 border border-dashed border-stone-300 text-stone-500 text-xs flex items-center justify-between print:hidden">
+                                        <span>Annexure C (Event Timings & Extension Charges) is currently <strong>turned OFF</strong> and will not appear in the PDF, Word document, or client view.</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setIncludeAnnexureC(true)
+                                                setHasUnsavedChanges(true)
+                                            }}
+                                            className="underline font-bold text-amber-700 hover:text-amber-900 ml-4"
+                                        >
+                                            Enable Annexure C
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <table className="border-collapse border border-black text-center text-sm w-full max-w-[38rem]">
+                                        <thead>
+                                            <tr className="bg-stone-50">
+                                                <th className="border border-black p-1.5 px-4 text-xs text-left font-bold w-1/3">Meal Type</th>
+                                                <th className="border border-black p-1.5 px-4 text-xs font-bold w-1/3">Timings</th>
+                                                <th className="border border-black p-1.5 px-4 text-xs font-bold w-1/3">Extension Charges (₹/Hour)</th>
+                                                {!isClientPreview && <th className="border border-black p-1 text-xs w-10 print:hidden"></th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {annexureCRows.map((row, idx) => (
+                                                <tr key={row.id || idx} className="hover:bg-amber-50/20 transition-colors">
+                                                    <td className="border border-black p-1 px-3 text-xs text-left">
+                                                        {isClientPreview ? (
+                                                            <span>{row.meal}</span>
+                                                        ) : (
+                                                            <input
+                                                                type="text"
+                                                                value={row.meal}
+                                                                onChange={(e) => {
+                                                                    const updated = [...annexureCRows]
+                                                                    updated[idx].meal = e.target.value
+                                                                    setAnnexureCRows(updated)
+                                                                    setHasUnsavedChanges(true)
+                                                                }}
+                                                                className="w-full bg-transparent border-b border-transparent hover:border-stone-300 focus:border-black outline-none font-medium text-xs"
+                                                                placeholder="e.g. Breakfast"
+                                                            />
+                                                        )}
+                                                    </td>
+                                                    <td className="border border-black p-1 px-3 text-xs">
+                                                        {isClientPreview ? (
+                                                            <span>{row.timings}</span>
+                                                        ) : (
+                                                            <input
+                                                                type="text"
+                                                                value={row.timings}
+                                                                onChange={(e) => {
+                                                                    const updated = [...annexureCRows]
+                                                                    updated[idx].timings = e.target.value
+                                                                    setAnnexureCRows(updated)
+                                                                    setHasUnsavedChanges(true)
+                                                                }}
+                                                                className="w-full text-center bg-transparent border-b border-transparent hover:border-stone-300 focus:border-black outline-none text-xs"
+                                                                placeholder="e.g. 7:00 AM - 11:00 AM"
+                                                            />
+                                                        )}
+                                                    </td>
+                                                    <td className="border border-black p-1 px-3 text-xs">
+                                                        {isClientPreview ? (
+                                                            <span>{row.charges}</span>
+                                                        ) : (
+                                                            <input
+                                                                type="text"
+                                                                value={row.charges}
+                                                                onChange={(e) => {
+                                                                    const updated = [...annexureCRows]
+                                                                    updated[idx].charges = e.target.value
+                                                                    setAnnexureCRows(updated)
+                                                                    setHasUnsavedChanges(true)
+                                                                }}
+                                                                className="w-full text-center bg-transparent border-b border-transparent hover:border-stone-300 focus:border-black outline-none font-semibold text-xs"
+                                                                placeholder="e.g. 50,000"
+                                                            />
+                                                        )}
+                                                    </td>
+                                                    {!isClientPreview && (
+                                                        <td className="border border-black p-1 text-center print:hidden">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAnnexureCRows(annexureCRows.filter((_, i) => i !== idx))
+                                                                    setHasUnsavedChanges(true)
+                                                                }}
+                                                                className="text-stone-400 hover:text-red-600 font-bold px-1 transition text-xs"
+                                                                title="Remove Row"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            ))}
+                                            {annexureCRows.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={isClientPreview ? 3 : 4} className="border border-black p-3 text-center text-xs text-stone-400 italic">
+                                                        No timings or extension charges added. Click "+ Add Row" or "Reset Defaults".
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                )}
                             </div>
                         </div>
 
@@ -2018,8 +2276,8 @@ export default function QuotationPage() {
                                 {/* NEW: CLIENT DETAILS */}
                                 <div className="space-y-4">
                                     <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Client Details</h4>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="col-span-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="col-span-1 sm:col-span-2">
                                             <label className={labelClass}>Client Name</label>
                                             <input className={inputClass} value={clientName} onChange={e => { setClientName(e.target.value); setHasUnsavedChanges(true) }} />
                                         </div>
@@ -2027,7 +2285,7 @@ export default function QuotationPage() {
                                         <div><label className={labelClass}>Contact Person</label><input className={inputClass} value={clientContact} onChange={e => { setClientContact(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                         <div><label className={labelClass}>Mobile</label><input className={inputClass} value={clientMobile} onChange={e => { setClientMobile(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                         <div><label className={labelClass}>Email</label><input className={inputClass} value={clientEmail} onChange={e => { setClientEmail(e.target.value); setHasUnsavedChanges(true) }} /></div>
-                                        <div className="col-span-2">
+                                        <div className="col-span-1 sm:col-span-2">
                                             <label className={labelClass}>Client Street / Office Address</label>
                                             <textarea className={`${inputClass} h-16`} value={clientAddress} placeholder="Street address, building, suite..." onChange={e => { setClientAddress(e.target.value); setHasUnsavedChanges(true) }} />
                                         </div>
@@ -2038,13 +2296,13 @@ export default function QuotationPage() {
 
                                 <div className="space-y-4">
                                     <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Schedule & Type</h4>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div><label className={labelClass}>Start Date</label><input type="date" className={inputClass} value={startDate} onChange={e => { setStartDate(e.target.value); setHasUnsavedChanges(true); if (!endDate) setEndDate(e.target.value) }} /></div>
                                         <div><label className={labelClass}>End Date</label><input type="date" className={inputClass} value={endDate} onChange={e => { setEndDate(e.target.value); setHasUnsavedChanges(true) }} min={startDate} /></div>
                                     </div>
                                     {days > 0 && <div className="bg-gray-100 p-2 rounded text-center text-xs font-bold text-black uppercase tracking-wide">{days} Day Event</div>}
 
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
                                             <label className={labelClass}>Event Type</label>
                                             <select className={inputClass} value={eventType} onChange={e => { setEventType(e.target.value as any); setHasUnsavedChanges(true) }}>
@@ -2065,7 +2323,7 @@ export default function QuotationPage() {
                                 <div className="space-y-4">
                                     <h4 className="text-sm font-black text-black uppercase tracking-widest border-b border-gray-200 pb-2">Point of Contact (Event Specific)</h4>
                                     <div><label className={labelClass}>POC Name</label><input className={inputClass} value={pocName} onChange={e => { setPocName(e.target.value); setHasUnsavedChanges(true) }} /></div>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div><label className={labelClass}>Mobile</label><input className={inputClass} value={pocMobile} onChange={e => { setPocMobile(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                         <div><label className={labelClass}>Email</label><input className={inputClass} value={pocEmail} onChange={e => { setPocEmail(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     </div>
@@ -2092,7 +2350,7 @@ export default function QuotationPage() {
 
                                 <div><label className={labelClass}>Venue Name</label><input className={`${inputClass} text-lg`} value={venueName} onChange={e => { setVenueName(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                 <div><label className={labelClass}>Venue Address (Street / Landmark)</label><textarea className={`${inputClass} h-20`} value={fullAddress} onChange={e => { setFullAddress(e.target.value); setHasUnsavedChanges(true) }} /></div>
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                     <div><label className={labelClass}>City</label><input className={inputClass} value={city} onChange={e => { setCity(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     <div><label className={labelClass}>State</label><input className={inputClass} value={state} onChange={e => { setState(e.target.value); setHasUnsavedChanges(true) }} /></div>
                                     <div><label className={labelClass}>PIN / Postal Code</label><input className={inputClass} value={venueZipcode} placeholder="e.g. 560001" onChange={e => { setVenueZipcode(e.target.value); setHasUnsavedChanges(true) }} /></div>

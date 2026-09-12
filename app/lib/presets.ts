@@ -7,6 +7,7 @@ export interface MenuPreset {
   mealCategory: 'ALL' | 'BREAKFAST' | 'LUNCH' | 'HI-TEA' | 'DINNER' | 'MEALS'
   items: string[]
   isCustom?: boolean
+  sortOrder?: number
   createdAt?: string
 }
 
@@ -29,6 +30,7 @@ export const DEFAULT_PRESETS: MenuPreset[] = [
       'Appalam / Papad'
     ],
     isCustom: false,
+    sortOrder: 1,
   },
   {
     id: 'preset_traditional_breakfast',
@@ -46,6 +48,7 @@ export const DEFAULT_PRESETS: MenuPreset[] = [
       'Saffron Kesari bath'
     ],
     isCustom: false,
+    sortOrder: 2,
   },
   {
     id: 'preset_royal_breakfast',
@@ -65,6 +68,7 @@ export const DEFAULT_PRESETS: MenuPreset[] = [
       'Pheni with Badam Milk'
     ],
     isCustom: false,
+    sortOrder: 3,
   },
   {
     id: 'preset_classic_hitea',
@@ -82,6 +86,7 @@ export const DEFAULT_PRESETS: MenuPreset[] = [
       'Coconut'
     ],
     isCustom: false,
+    sortOrder: 4,
   },
   {
     id: 'preset_festive_dinner',
@@ -99,6 +104,7 @@ export const DEFAULT_PRESETS: MenuPreset[] = [
       'Badam Milk'
     ],
     isCustom: false,
+    sortOrder: 5,
   },
   {
     id: 'preset_banana_leaf_meals',
@@ -118,12 +124,61 @@ export const DEFAULT_PRESETS: MenuPreset[] = [
       'Pickle & Ghee Podi'
     ],
     isCustom: false,
+    sortOrder: 6,
   }
 ]
 
 const LOCAL_STORAGE_KEY = 'trc_custom_menu_presets'
 
-// Get all presets (defaults + customs)
+// Map database row to MenuPreset
+export function mapRowToPreset(row: any): MenuPreset {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    mealCategory: (row.meal_category || 'ALL') as MenuPreset['mealCategory'],
+    items: Array.isArray(row.items) ? row.items : (typeof row.items === 'string' ? JSON.parse(row.items) : []),
+    isCustom: row.is_custom !== undefined ? row.is_custom : true,
+    sortOrder: row.sort_order || 0,
+    createdAt: row.created_at,
+  }
+}
+
+// Map MenuPreset to database row format
+export function mapPresetToRow(preset: Partial<MenuPreset> & { name: string; items: string[] }) {
+  return {
+    id: preset.id || `preset_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    name: preset.name.trim(),
+    description: (preset.description || '').trim(),
+    meal_category: preset.mealCategory || 'ALL',
+    items: preset.items,
+    is_custom: preset.isCustom ?? true,
+    sort_order: preset.sortOrder ?? 0,
+  }
+}
+
+// Fetch all presets from Supabase (with fallback to DEFAULT_PRESETS)
+export async function fetchAllPresets(): Promise<MenuPreset[]> {
+  try {
+    const { data, error } = await supabase
+      .from('menu_presets')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (error || !data || data.length === 0) {
+      console.warn('Could not fetch from menu_presets, falling back to local/default:', error?.message)
+      return getAllPresets()
+    }
+
+    return data.map(mapRowToPreset)
+  } catch (e) {
+    console.error('Failed to fetch presets from Supabase:', e)
+    return getAllPresets()
+  }
+}
+
+// Synchronous helper for initial render / fallback
 export function getAllPresets(): MenuPreset[] {
   let customPresets: MenuPreset[] = []
   if (typeof window !== 'undefined') {
@@ -139,69 +194,101 @@ export function getAllPresets(): MenuPreset[] {
   return [...DEFAULT_PRESETS, ...customPresets]
 }
 
-// Save a new custom preset
+// Admin save (Create or Update) preset in Supabase
+export async function savePreset(preset: {
+  id?: string
+  name: string
+  description?: string
+  mealCategory?: MenuPreset['mealCategory']
+  items: string[]
+  isCustom?: boolean
+  sortOrder?: number
+}): Promise<MenuPreset> {
+  const row = mapPresetToRow(preset)
+  const mappedPreset = mapRowToPreset(row)
+
+  // Upsert into Supabase
+  const { error } = await supabase
+    .from('menu_presets')
+    .upsert(row, { onConflict: 'id' })
+
+  if (error) {
+    console.error('Error saving preset to Supabase:', error)
+    throw new Error(error.message)
+  }
+
+  // Also update local storage for offline resilience
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY)
+      const list: MenuPreset[] = stored ? JSON.parse(stored) : []
+      const index = list.findIndex(p => p.id === mappedPreset.id)
+      if (index >= 0) {
+        list[index] = mappedPreset
+      } else {
+        list.unshift(mappedPreset)
+      }
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list))
+    } catch (e) {}
+  }
+
+  return mappedPreset
+}
+
+// Admin delete preset from Supabase
+export async function deletePreset(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('menu_presets')
+    .delete()
+    .eq('id', id)
+
+  if (error) {
+    console.error('Error deleting preset from Supabase:', error)
+    throw new Error(error.message)
+  }
+
+  // Remove from localStorage if exists
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY)
+      if (stored) {
+        const list: MenuPreset[] = JSON.parse(stored)
+        const filtered = list.filter(p => p.id !== id)
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered))
+      }
+    } catch (e) {}
+  }
+}
+
+// Backwards-compatible custom preset save (redirects to savePreset)
 export function saveCustomPreset(preset: {
   name: string
   description?: string
   mealCategory?: MenuPreset['mealCategory']
   items: string[]
 }): MenuPreset {
-  const newPreset: MenuPreset = {
-    id: `preset_custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    name: preset.name.trim(),
-    description: (preset.description || `Custom preset with ${preset.items.length} items`).trim(),
-    mealCategory: preset.mealCategory || 'ALL',
-    items: [...preset.items],
-    isCustom: true,
-    createdAt: new Date().toISOString(),
-  }
+  const row = mapPresetToRow({ ...preset, isCustom: true })
+  const mappedPreset = mapRowToPreset(row)
 
   if (typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_KEY)
       const currentList: MenuPreset[] = stored ? JSON.parse(stored) : []
-      currentList.unshift(newPreset)
+      currentList.unshift(mappedPreset)
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentList))
-    } catch (e) {
-      console.error('Failed to save custom preset to localStorage', e)
-    }
+    } catch (e) {}
   }
 
-  // Best effort sync with Supabase if table exists
   try {
     Promise.resolve(
-      supabase.from('menu_presets').insert({
-        id: newPreset.id,
-        name: newPreset.name,
-        description: newPreset.description,
-        meal_category: newPreset.mealCategory,
-        items: newPreset.items,
-        is_custom: true,
-      })
+      supabase.from('menu_presets').upsert(row)
     ).catch(() => {})
   } catch (e) {}
 
-  return newPreset
+  return mappedPreset
 }
 
-// Delete custom preset
+// Backwards-compatible custom preset delete
 export function deleteCustomPreset(id: string): void {
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem(LOCAL_STORAGE_KEY)
-      if (stored) {
-        const currentList: MenuPreset[] = JSON.parse(stored)
-        const filtered = currentList.filter(p => p.id !== id)
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered))
-      }
-    } catch (e) {
-      console.error('Failed to delete custom preset from localStorage', e)
-    }
-  }
-
-  try {
-    Promise.resolve(
-      supabase.from('menu_presets').delete().eq('id', id)
-    ).catch(() => {})
-  } catch (e) {}
+  deletePreset(id).catch(() => {})
 }

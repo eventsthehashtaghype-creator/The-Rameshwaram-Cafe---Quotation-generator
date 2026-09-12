@@ -1,15 +1,19 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/app/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AppSidebar from '@/app/components/AppSidebar'
+import CalendarPrintModal from './CalendarPrintModal'
+import { getStatusDisplayInfo, isEventClosed } from '@/app/lib/eventStatus'
 
 export default function CalendarPage() {
     const router = useRouter()
     const [events, setEvents] = useState<any[]>([])
     const [currentDate, setCurrentDate] = useState(new Date())
     const [selectedDayOverflow, setSelectedDayOverflow] = useState<{ day: number, events: any[] } | null>(null)
+    const [isPrintModalOpen, setIsPrintModalOpen] = useState(false)
+    const [mobileView, setMobileView] = useState<'agenda' | 'grid'>('agenda')
 
     useEffect(() => { fetchEvents() }, [])
 
@@ -26,7 +30,7 @@ export default function CalendarPage() {
             return
         }
 
-        const { data } = await supabase.from('events').select('*, client:clients(entity_name)')
+        const { data } = await supabase.from('events').select('*, client:clients(id, entity_name, contact_person, mobile, email)')
         if (data) setEvents(data.filter((e: any) => e.status !== 'cancelled'))
     }
 
@@ -34,6 +38,19 @@ export default function CalendarPage() {
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
     const firstDay = new Date(year, month, 1); const daysInMonth = new Date(year, month + 1, 0).getDate()
     const startingDayOfWeek = firstDay.getDay()
+
+    // Chronological events for current month (Agenda View on Mobile)
+    const monthEvents = useMemo(() => {
+        const startOfMonth = new Date(year, month, 1)
+        const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999)
+        return events.filter(e => {
+            const s = new Date(e.event_date)
+            const end = e.end_date ? new Date(e.end_date) : s
+            s.setHours(0, 0, 0, 0)
+            end.setHours(23, 59, 59, 999)
+            return s <= endOfMonth && end >= startOfMonth
+        }).sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
+    }, [events, year, month])
 
     const getEventsForDay = (day: number) => events.filter(e => {
         const currentTargetDate = new Date(year, month, day) // The calendar cell date
@@ -52,26 +69,155 @@ export default function CalendarPage() {
     return (
         <div className="flex h-screen bg-[#F3F4F6] font-sans overflow-hidden">
             <AppSidebar />
-            <main className="flex-1 overflow-y-auto relative p-4 md:p-8 lg:p-12">
+            <main className="flex-1 overflow-y-auto relative p-4 sm:p-6 md:p-8 lg:p-12">
                 {/* Mobile Header Spacer */}
                 <div className="h-16 lg:hidden"></div>
 
                 {/* HEADER */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6 mb-6 sm:mb-10">
                     <div>
-                        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Event Calendar</h1>
-                        <p className="text-slate-500 mt-2 text-sm font-medium">Manage your schedule for {monthNames[month]} {year}.</p>
+                        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Event Calendar</h1>
+                        <p className="text-slate-500 mt-1 sm:mt-2 text-xs sm:text-sm font-medium">Manage your schedule for {monthNames[month]} {year}.</p>
                     </div>
 
-                    <div className="flex items-center bg-white rounded-xl shadow-sm border border-slate-200 p-1.5">
-                        <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 rounded-lg text-slate-500 hover:text-slate-800 transition">←</button>
-                        <span className="w-48 text-center font-bold text-slate-800 text-lg select-none">{monthNames[month]} {year}</span>
-                        <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="w-10 h-10 flex items-center justify-center hover:bg-slate-50 rounded-lg text-slate-500 hover:text-slate-800 transition">→</button>
+                    <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                        <button 
+                            onClick={() => setIsPrintModalOpen(true)}
+                            className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-black rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center gap-2 transition cursor-pointer"
+                        >
+                            <span>🖨️</span> Print / Export
+                        </button>
+                        <div className="flex items-center bg-white rounded-xl shadow-sm border border-slate-200 p-1">
+                            <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center hover:bg-slate-50 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer">←</button>
+                            <span className="w-36 sm:w-48 text-center font-bold text-slate-800 text-sm sm:text-lg select-none">{monthNames[month]} {year}</span>
+                            <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center hover:bg-slate-50 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer">→</button>
+                        </div>
                     </div>
                 </div>
 
-                {/* CALENDAR GRID */}
-                <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden w-full">
+                {/* Mobile & Tablet View Switcher (< lg) */}
+                <div className="lg:hidden flex items-center justify-between mb-4 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                    <button
+                        type="button"
+                        onClick={() => setMobileView('agenda')}
+                        className={`flex-1 py-2 px-3 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            mobileView === 'agenda' ? 'bg-black text-white shadow-xs' : 'text-slate-600 hover:text-black'
+                        }`}
+                    >
+                        <span>📅</span> Month Agenda ({monthEvents.length})
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setMobileView('grid')}
+                        className={`flex-1 py-2 px-3 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            mobileView === 'grid' ? 'bg-black text-white shadow-xs' : 'text-slate-600 hover:text-black'
+                        }`}
+                    >
+                        <span>🗓️</span> Full Grid (Gantt)
+                    </button>
+                </div>
+
+                {/* MOBILE AGENDA VIEW (< lg) */}
+                <div className={`lg:hidden mb-6 ${mobileView === 'agenda' ? 'block' : 'hidden'}`}>
+                    {monthEvents.length === 0 ? (
+                        <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-2">
+                            <span className="text-3xl">📅</span>
+                            <h3 className="font-bold text-sm text-slate-700">No events scheduled</h3>
+                            <p className="text-xs text-slate-400">There are no confirmed or active events in {monthNames[month]} {year}.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {monthEvents.map((evt) => {
+                                const statusInfo = getStatusDisplayInfo(evt)
+                                const s = new Date(evt.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                                const end = evt.end_date ? new Date(evt.end_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : s
+                                const dateRangeStr = s === end ? s : `${s} – ${end}`
+
+                                return (
+                                    <div key={evt.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div>
+                                                <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider mb-1">
+                                                    {dateRangeStr}
+                                                </span>
+                                                <h4 className="font-black text-sm text-slate-900 truncate max-w-[220px]">
+                                                    {evt.client?.entity_name || evt.clients?.entity_name || 'Client Event'}
+                                                </h4>
+                                                <span className="text-[11px] font-bold text-slate-400">
+                                                    {evt.event_code} • {evt.pax_count ? `${evt.pax_count} Pax` : evt.event_size || 'Standard'}
+                                                </span>
+                                            </div>
+                                            <span className={`px-2.5 py-0.5 text-[9px] font-black uppercase rounded tracking-wide border shrink-0 ${statusInfo.badgeClass}`}>
+                                                ● {statusInfo.label}
+                                            </span>
+                                        </div>
+
+                                        {/* Complete Venue Address */}
+                                        {(evt.venue_name || evt.venue_address || evt.city) && (
+                                            <div className="text-xs text-amber-950 font-semibold bg-amber-50/60 p-2.5 rounded-lg border border-amber-200/60 space-y-0.5">
+                                                <div className="flex items-center gap-1 font-bold text-amber-900">
+                                                    <span>📍</span> <span>{evt.venue_name || 'Venue'}</span>
+                                                </div>
+                                                {evt.venue_address && (
+                                                    <div className="text-[11px] text-gray-600 font-normal pl-4 leading-tight">{evt.venue_address}</div>
+                                                )}
+                                                {(evt.city || evt.state || evt.venue_zipcode) && (
+                                                    <div className="text-[10px] text-gray-500 font-normal pl-4">
+                                                        {[evt.city, evt.state, evt.venue_zipcode ? `PIN: ${evt.venue_zipcode}` : ''].filter(Boolean).join(', ')}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* POC Details */}
+                                        {(() => {
+                                            const pocName = evt.poc_name || evt.client?.contact_person
+                                            const pocMobile = evt.poc_mobile || evt.client?.mobile
+                                            if (!pocName && !pocMobile) return null
+                                            return (
+                                                <div className="text-[11px] text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-100 flex items-center justify-between">
+                                                    <span className="font-bold flex items-center gap-1">
+                                                        <span>👤</span> {pocName || 'POC'}
+                                                    </span>
+                                                    {pocMobile && (
+                                                        <a href={`tel:${pocMobile}`} className="text-blue-600 font-bold font-mono text-[11px]">
+                                                            📞 {pocMobile}
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            )
+                                        })()}
+
+                                        <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                                            <Link
+                                                href={`/quotation/${evt.id}`}
+                                                className="flex-1 py-1.5 px-3 bg-black hover:bg-slate-800 text-white rounded-lg text-xs font-bold text-center transition"
+                                            >
+                                                Open Quote
+                                            </Link>
+                                            <Link
+                                                href={`/client-menu/${evt.id}?preview=true`}
+                                                className="py-1.5 px-3 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-100 rounded-lg text-xs font-bold text-center transition"
+                                            >
+                                                Preview Menu
+                                            </Link>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* CALENDAR GRID (Hidden when mobile is in Agenda view; Always visible on Desktop lg:) */}
+                <div className={`bg-white rounded-2xl sm:rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden w-full ${
+                    mobileView === 'grid' ? 'block' : 'hidden lg:block'
+                }`}>
+                    {/* Horizontal scroll hint on touch */}
+                    <div className="lg:hidden bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-500 border-b border-slate-200 flex items-center justify-between">
+                        <span>👉 Swipe horizontally to view all days</span>
+                        <span className="text-[10px] text-slate-400">Sun – Sat</span>
+                    </div>
                     <div className="overflow-x-auto w-full scrollbar-hide">
                         <div className="min-w-[1000px] w-full">
                             {/* Days Header */}
@@ -277,6 +423,14 @@ export default function CalendarPage() {
                     </div>
                 </div>
             )}
+
+            {/* CALENDAR PRINT / EXPORT MODAL */}
+            <CalendarPrintModal
+                isOpen={isPrintModalOpen}
+                onClose={() => setIsPrintModalOpen(false)}
+                events={events}
+                currentDate={currentDate}
+            />
         </div>
     )
 }

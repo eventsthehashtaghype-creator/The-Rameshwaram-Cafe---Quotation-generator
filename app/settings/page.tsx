@@ -297,7 +297,7 @@ export default function SettingsPage() {
 
         <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-8">Settings & Access</h1>
 
-        <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl shadow-sm border border-slate-200 w-fit mb-8">
+        <div className="flex flex-col sm:flex-row gap-1 bg-white p-1.5 rounded-xl shadow-sm border border-slate-200 w-full sm:w-fit mb-8">
           {[
             { id: 'general', label: 'General Configuration' },
             { id: 'reminders', label: 'Reminders (Email & WhatsApp)' },
@@ -306,7 +306,7 @@ export default function SettingsPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
+              className={`px-4 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all text-center ${
                 activeTab === tab.id ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:text-slate-900'
               }`}
             >
@@ -365,40 +365,6 @@ export default function SettingsPage() {
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Branch</label>
                   <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={bankBranch} onChange={e => { setBankBranch(e.target.value); setHasUnsavedChanges(true); }} placeholder="Branch Name" />
-                </div>
-              </div>
-            </div>
-
-            {/* QUOTATION DEFAULTS */}
-            <div className="bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-                <span className="text-purple-500">📄</span> Quotation Defaults
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Default Validity (Days)</label>
-                  <input type="number" min="1" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={defaultValidity} onChange={e => { setDefaultValidity(Math.max(1, parseInt(e.target.value) || 1)); setHasUnsavedChanges(true); }} />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Default Terms & Conditions</label>
-                  <textarea rows={4} className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={defaultTandC} onChange={e => { setDefaultTandC(e.target.value); setHasUnsavedChanges(true); }} placeholder="These terms will automatically populate new quotations..." />
-                </div>
-              </div>
-            </div>
-
-            {/* AUTOMATION PREFERENCES */}
-            <div className="bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-                <span className="text-amber-500">⚙️</span> Automation Preferences
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Event Reminder (Days Before)</label>
-                  <input type="number" min="0" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={reminderDays} onChange={e => { setReminderDays(Math.max(0, parseInt(e.target.value) || 0)); setHasUnsavedChanges(true); }} />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Admin Email</label>
-                  <input className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" value={adminEmail} onChange={e => { setAdminEmail(e.target.value); setHasUnsavedChanges(true); }} />
                 </div>
               </div>
             </div>
@@ -586,8 +552,23 @@ export default function SettingsPage() {
                     <p className="text-[11px] text-slate-400 mt-1">Receives automated HTML email digest with event details.</p>
                   </div>
 
+                  {/* Event Reminder Window */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+                      Event Reminder &amp; Lock Warning (Days Before Event)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-shadow"
+                      value={reminderDays}
+                      onChange={e => { setReminderDays(Math.max(0, parseInt(e.target.value) || 0)); setHasUnsavedChanges(true); }}
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">Days before event to trigger Menu &amp; Quote locking warnings.</p>
+                  </div>
+
                   {/* WhatsApp Webhook URL */}
-                  <div className="md:col-span-2">
+                  <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
                       WhatsApp Webhook URL (Optional for Automated APIs)
                     </label>
@@ -596,9 +577,9 @@ export default function SettingsPage() {
                       className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-mono text-xs text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-shadow"
                       value={whatsappWebhookUrl}
                       onChange={e => { setWhatsappWebhookUrl(e.target.value); setHasUnsavedChanges(true); }}
-                      placeholder="https://api.ultramsg.com/... or https://your-webhook-endpoint.com/send"
+                      placeholder="https://api.ultramsg.com/... or webhook URL"
                     />
-                    <p className="text-[11px] text-slate-400 mt-1">If specified, the 3-day reminder will automatically HTTP POST the formatted WhatsApp message.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Optional HTTP endpoint to POST formatted WhatsApp message.</p>
                   </div>
                 </div>
 
@@ -765,7 +746,8 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden overflow-x-auto">
+            {/* DESKTOP USERS TABLE (Hidden on Mobile/Tablet) */}
+            <div className="hidden lg:block bg-white rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[800px]">
                 <thead className="bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase">
                   <tr>
@@ -805,13 +787,13 @@ export default function SettingsPage() {
                           </span>
                         </td>
                         <td className="p-5 text-right space-x-2">
-                          <button onClick={() => copyCredentials(u)} className="p-2 text-slate-400 hover:text-slate-800 transition" title="Copy Login Credentials">
+                          <button onClick={() => copyCredentials(u)} className="p-2 text-slate-400 hover:text-slate-800 transition cursor-pointer" title="Copy Login Credentials">
                             📋
                           </button>
-                          <button onClick={() => openEditUserModal(u)} className="p-2 text-slate-400 hover:text-blue-600 transition" title="Edit Permissions">
+                          <button onClick={() => openEditUserModal(u)} className="p-2 text-slate-400 hover:text-blue-600 transition cursor-pointer" title="Edit Permissions">
                             ✏️
                           </button>
-                          <button onClick={() => deleteUser(u.id)} className="p-2 text-slate-400 hover:text-red-600 transition" title="Delete User">
+                          <button onClick={() => deleteUser(u.id)} className="p-2 text-slate-400 hover:text-red-600 transition cursor-pointer" title="Delete User">
                             🗑️
                           </button>
                         </td>
@@ -821,6 +803,60 @@ export default function SettingsPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* MOBILE / TABLET USER CARDS (Visible on < lg) */}
+            <div className="lg:hidden space-y-4">
+              {users.map(u => {
+                const activePermsCount = Object.values(u.permissions || {}).filter(Boolean).length
+                const totalPerms = Object.keys(u.permissions || {}).length
+
+                return (
+                  <div key={u.id} className="bg-white rounded-2xl p-5 shadow-md border border-slate-100 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-base flex items-center gap-1.5">
+                          <span>👤</span> {u.full_name}
+                        </h3>
+                        <p className="text-xs text-slate-500 font-mono mt-0.5">{u.email}</p>
+                      </div>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${activePermsCount === totalPerms ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}`}>
+                        {activePermsCount === totalPerms ? 'Full Access' : `${activePermsCount} Modules`}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-3 rounded-xl flex items-center justify-between border border-slate-100">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Assigned Password</span>
+                        <span className="font-mono text-xs font-bold text-slate-700">
+                          {u.assigned_password || 'Hidden / Custom'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => copyCredentials(u)}
+                        className="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-2xs hover:bg-slate-100 transition flex items-center gap-1 cursor-pointer"
+                      >
+                        📋 Copy
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => openEditUserModal(u)}
+                        className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        ✏️ Edit User
+                      </button>
+                      <button
+                        onClick={() => deleteUser(u.id)}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
 
@@ -828,14 +864,14 @@ export default function SettingsPage() {
 
       {/* USER MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-black text-slate-900 mb-6 flex items-center gap-2">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200 max-h-[94vh] flex flex-col overflow-hidden">
+            <h3 className="text-lg sm:text-xl font-black text-slate-900 mb-4 sm:mb-6 flex items-center gap-2 shrink-0">
               <span>{editingUserId ? '✏️' : '✨'}</span>
               {editingUserId ? 'Edit User Credentials' : 'Create New User Profile'}
             </h3>
 
-            <form onSubmit={handleUserSubmit} className="space-y-6">
+            <form onSubmit={handleUserSubmit} className="space-y-4 sm:space-y-6 overflow-y-auto flex-1 pr-1">
               <div>
                 <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Full Name</label>
                 <input required className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={modalName} onChange={e => setModalName(e.target.value)} placeholder="e.g. Anand" />
@@ -851,7 +887,7 @@ export default function SettingsPage() {
                 <input required={!editingUserId} type="text" className="w-full border border-slate-200 bg-slate-50 p-3 rounded-xl font-mono text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={modalPassword} onChange={e => setModalPassword(e.target.value)} placeholder="Min 6 characters..." />
               </div>
 
-              <div className="border-t border-slate-100 pt-6">
+              <div className="border-t border-slate-100 pt-4 sm:pt-6">
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-3 ml-1">Module Access (Tick to Allow)</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {Object.keys(defaultPermissions).map((key) => (
@@ -872,9 +908,9 @@ export default function SettingsPage() {
                 <p className="text-[10px] text-slate-400 mt-3 ml-1">Note: Granting 'Settings' access effectively makes this user an Administrator who can also add/remove other users.</p>
               </div>
 
-              <div className="flex gap-3 justify-end pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition">Cancel</button>
-                <button type="submit" disabled={isSubmitting} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2">
+              <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 justify-end pt-4 border-t border-slate-100 shrink-0">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="w-full sm:w-auto px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition text-center cursor-pointer">Cancel</button>
+                <button type="submit" disabled={isSubmitting} className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-bold rounded-xl shadow hover:bg-blue-700 transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
                   {isSubmitting ? 'Processing...' : (editingUserId ? 'Save Changes' : 'Create User')}
                 </button>
               </div>

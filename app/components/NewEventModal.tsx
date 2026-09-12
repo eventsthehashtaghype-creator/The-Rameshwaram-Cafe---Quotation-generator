@@ -242,17 +242,17 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
   const sectionTitleClass = "text-sm font-black text-black uppercase tracking-widest mb-4"
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm font-sans">
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col border border-gray-400">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm font-sans">
+      <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-6xl max-h-[96vh] overflow-hidden flex flex-col border border-gray-300">
 
         {/* Header */}
-        <div className="bg-white p-6 border-b border-gray-300 flex justify-between items-center shrink-0">
-          <div><h2 className="text-2xl font-black text-black tracking-tight uppercase">New Event Project</h2></div>
-          <button onClick={onClose} className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-black hover:bg-red-100 hover:text-red-600 transition font-bold text-xl border border-gray-300">✕</button>
+        <div className="bg-white p-4 sm:p-6 border-b border-gray-300 flex justify-between items-center shrink-0">
+          <div><h2 className="text-xl sm:text-2xl font-black text-black tracking-tight uppercase">New Event Project</h2></div>
+          <button onClick={onClose} className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-gray-100 text-black hover:bg-red-100 hover:text-red-600 transition font-bold text-lg sm:text-xl border border-gray-300 cursor-pointer">✕</button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8 bg-gray-50 relative">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-gray-50 relative">
 
           {errorMessage && (
             <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-xl flex items-start gap-4 shadow-sm animate-in slide-in-from-top-2 duration-300">
@@ -527,9 +527,9 @@ export default function NewEventModal({ onClose, onSuccess }: { onClose: () => v
         </div>
 
         {/* Footer */}
-        <div className="p-4 lg:p-6 border-t border-gray-300 bg-white shrink-0 flex flex-col-reverse lg:flex-row justify-end gap-3 z-10">
-          <button onClick={onClose} className="w-full lg:w-auto px-6 py-3 font-bold text-black hover:bg-gray-100 border border-gray-300 rounded transition">Cancel</button>
-          <button onClick={handleSubmit} disabled={loading} className="w-full lg:w-auto px-8 py-3 bg-black text-white rounded font-bold hover:bg-gray-900 shadow-lg transition active:scale-95 disabled:opacity-50">
+        <div className="p-3 sm:p-4 lg:p-6 border-t border-gray-300 bg-white shrink-0 flex flex-col-reverse sm:flex-row justify-end gap-2.5 sm:gap-3 z-10">
+          <button onClick={onClose} className="w-full sm:w-auto px-6 py-3 font-bold text-black hover:bg-gray-100 border border-gray-300 rounded-xl transition cursor-pointer">Cancel</button>
+          <button onClick={handleSubmit} disabled={loading} className="w-full sm:w-auto px-8 py-3 bg-black text-white rounded-xl font-bold hover:bg-gray-900 shadow-lg transition active:scale-95 disabled:opacity-50 cursor-pointer">
             {loading ? 'Processing...' : 'Create Event Project'}
           </button>
         </div>

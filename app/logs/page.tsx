@@ -58,6 +58,9 @@ export default function ActivityLogsPage() {
     <div className="flex h-screen bg-[#F3F4F6] font-sans text-black">
       <AppSidebar />
       <main className="flex-1 overflow-y-auto p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
+        {/* Mobile Header Spacer */}
+        <div className="h-14 lg:hidden"></div>
+
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl lg:text-3xl font-black tracking-tight mb-1">Activity & Change Logs</h1>

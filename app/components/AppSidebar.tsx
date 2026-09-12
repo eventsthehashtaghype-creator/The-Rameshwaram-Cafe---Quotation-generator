@@ -159,20 +159,50 @@ export default function AppSidebar() {
 
   return (
     <>
-      <button onClick={() => setIsOpen(true)} className="lg:hidden fixed top-4 left-4 z-50 bg-black text-white p-2 rounded-lg shadow-lg hover:bg-gray-800 transition">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="size-6">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-        </svg>
-      </button>
+      {/* Mobile & Tablet Sticky Top App Bar */}
+      <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-900 border-b border-gray-800 z-40 flex items-center justify-between px-3 sm:px-4 shadow-md">
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setIsOpen(true)}
+            className="p-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition active:scale-95 cursor-pointer"
+            aria-label="Open Navigation Menu"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="size-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+          </button>
+          <img
+            src="/logo.png"
+            alt="The Rameshwaram Cafe"
+            className="h-8 max-w-[140px] sm:max-w-[180px] object-contain"
+            onError={(e) => { e.currentTarget.style.display = 'none' }}
+          />
+        </div>
 
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-gray-300 max-w-[110px] truncate hidden sm:inline">
+            {displayName}
+          </span>
+          <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] text-white shrink-0 ${perms.settings ? 'bg-purple-600' : 'bg-blue-600'}`}>
+            {initials}
+          </div>
+        </div>
+      </header>
+
+      {/* Desktop Sidebar (100% Preserved) */}
       <aside className="hidden lg:flex w-64 bg-[#0F172A] text-white flex-col h-screen shrink-0 font-sans border-r border-gray-800 sticky top-0">
         <NavContent />
       </aside>
 
+      {/* Mobile & Tablet Slide-Over Drawer */}
       {isOpen && (
         <div className="fixed inset-0 z-[100] lg:hidden">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-80 bg-[#0F172A] text-white flex flex-col h-full shadow-2xl animate-in slide-in-from-left duration-300">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsOpen(false)}
+          />
+          <aside className="absolute inset-y-0 left-0 w-72 sm:w-80 max-w-[85vw] bg-[#0F172A] text-white flex flex-col h-full shadow-2xl animate-in slide-in-from-left duration-300">
             <NavContent />
           </aside>
         </div>

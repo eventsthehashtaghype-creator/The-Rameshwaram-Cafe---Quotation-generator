@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 import { logActivity, getActivityLogs, getCurrentActorName, LogEntry } from '@/app/lib/audit'
+import { getStatusDisplayInfo, isEventClosed, isEventToday } from '@/app/lib/eventStatus'
 
 export default function Dashboard() {
   const [events, setEvents] = useState([])
@@ -117,6 +118,26 @@ export default function Dashboard() {
         details: 'Admin approved menu edit request for client',
       })
     }
+
+    fetchEvents()
+    fetchLogs()
+  }
+
+  const handleToggleMenuLock = async (event: any) => {
+    setActiveMenuId(null)
+    const nextState = !event.menu_locked
+    await supabase.from('events').update({ menu_locked: nextState }).eq('id', event.id)
+
+    const adminName = await getCurrentActorName()
+    await logActivity({
+      actorName: adminName,
+      clientName: event.clients?.entity_name || 'Client',
+      action: nextState ? 'Locked Menu' : 'Unlocked Menu',
+      districtState: [event.city, event.state].filter(Boolean).join(', ') || 'Karnataka',
+      eventStartDate: event.event_date,
+      eventCode: event.event_code || 'EVENT',
+      details: nextState ? 'Admin locked menu editing for client' : 'Admin unlocked menu editing to allow client edits',
+    })
 
     fetchEvents()
     fetchLogs()
@@ -243,22 +264,22 @@ export default function Dashboard() {
     return new Date(timestamp).toLocaleDateString('en-GB')
   }
 
-  // Helper: Status Badge Design
+  // Helper: Status Badge Design using real-time dates
   const getStatusBadge = (event: any) => {
-    const s = (event.status || 'draft').toLowerCase()
+    const info = getStatusDisplayInfo(event)
 
-    if (s === 'cancelled') return <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">● REJECTED</span>
-    if (s === 'confirmed') return <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">● CONFIRMED</span>
-
-    if (event.quote_status === 'edit_requested' || s === 'edit_requested')
-      return <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[10px] font-black uppercase rounded tracking-wide border border-purple-100">● EDIT REQUESTED</span>
-
-    if (event.quote_status === 'client_submitted')
-      return <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">● CLIENT REQUEST PENDING</span>
-
-    if (s === 'sent') return <span className="px-3 py-1 bg-blue-50 text-blue-600 text-[10px] font-black uppercase rounded tracking-wide border border-blue-100">● SENT</span>
-
-    return <span className="px-3 py-1 bg-gray-100 text-gray-500 text-[10px] font-black uppercase rounded tracking-wide border border-gray-200">● DRAFT</span>
+    return (
+      <div className="flex flex-col gap-1 items-start">
+        <span className={`px-3 py-1 text-[10px] font-black uppercase rounded tracking-wide border ${info.badgeClass}`}>
+          ● {info.label}
+        </span>
+        {event.menu_locked && (
+          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-bold rounded border border-amber-200">
+            🔒 Menu Locked
+          </span>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -384,21 +405,61 @@ export default function Dashboard() {
                                 {activeMenuId === event.id && (
                                   <div
                                     ref={menuRef}
-                                    className={`absolute right-0 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-[9999] overflow-hidden text-left ${isLastItem ? 'bottom-full mb-2 origin-bottom-right' : 'top-8 origin-top-right'}`}
+                                    className={`absolute right-0 w-64 bg-white border border-gray-200 shadow-xl rounded-lg z-[9999] overflow-hidden text-left ${isLastItem ? 'bottom-full mb-2 origin-bottom-right' : 'top-8 origin-top-right'}`}
                                   >
                                     <div className="p-2 border-b bg-gray-50 text-[10px] font-black text-gray-400 uppercase">Manage</div>
-                                    <Link href={`/client-menu/${event.id}`} target="_blank" className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">👁️ Preview Menu</Link>
-                                    <Link href={`/quotation/${event.id}?tab=settings`} className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">✏️ Edit Details</Link>
+                                    <Link href={`/client-menu/${event.id}?preview=true`} target="_blank" className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">👁️ Preview Menu</Link>
+                                    
+                                    {!isEventClosed(event) ? (
+                                      <Link href={`/quotation/${event.id}?tab=settings`} className="block px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">✏️ Edit Details</Link>
+                                    ) : (
+                                      <div className="px-4 py-3 text-xs font-bold text-gray-400 bg-gray-50 border-b border-gray-50 cursor-not-allowed">🔒 Event Closed (Uneditable)</div>
+                                    )}
+
                                     <button onClick={() => copyClientLink(event.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 border-b border-gray-50">🔗 Copy Client Link</button>
-                                    {(event.quote_status === 'edit_requested' || event.status === 'edit_requested') && (
+
+                                    {/* Menu Lock / Unlock Toggle Switch */}
+                                    <button 
+                                      onClick={() => handleToggleMenuLock(event)} 
+                                      disabled={isEventClosed(event)}
+                                      className={`w-full text-left px-4 py-3 text-xs font-bold border-b border-gray-50 flex items-center justify-between transition ${
+                                        isEventClosed(event) 
+                                          ? 'opacity-50 cursor-not-allowed bg-gray-50 text-gray-400' 
+                                          : event.menu_locked 
+                                            ? 'text-amber-800 bg-amber-50/50 hover:bg-amber-100/60' 
+                                            : 'text-emerald-700 hover:bg-emerald-50'
+                                      }`}
+                                    >
+                                      <span>{event.menu_locked ? '🔓 Unlock Client Edits' : '🔒 Lock Menu for Client'}</span>
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                        event.menu_locked ? 'bg-amber-200 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+                                      }`}>
+                                        {event.menu_locked ? 'Locked' : 'Unlocked'}
+                                      </span>
+                                    </button>
+
+                                    {!isEventClosed(event) && (event.quote_status === 'edit_requested' || event.status === 'edit_requested') && (
                                       <button onClick={() => handleApproveEdit(event.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-purple-700 hover:bg-purple-50 border-b border-gray-50">🔓 Approve Edit</button>
                                     )}
-                                    <button onClick={() => handleStatusChange(event.id, 'confirmed')} className="w-full text-left px-4 py-3 text-xs font-bold text-green-700 hover:bg-green-50 border-b border-gray-50">✅ Confirm</button>
-                                    <button onClick={() => handleStatusChange(event.id, 'cancelled')} className="w-full text-left px-4 py-3 text-xs font-bold text-red-700 hover:bg-red-50">⛔ Cancel</button>
+                                    {!isEventClosed(event) && (
+                                      <>
+                                        <button onClick={() => handleStatusChange(event.id, 'confirmed')} className="w-full text-left px-4 py-3 text-xs font-bold text-green-700 hover:bg-green-50 border-b border-gray-50">✅ Confirm</button>
+                                        <button onClick={() => handleStatusChange(event.id, 'cancelled')} className="w-full text-left px-4 py-3 text-xs font-bold text-red-700 hover:bg-red-50">⛔ Cancel</button>
+                                      </>
+                                    )}
                                   </div>
                                 )}
                               </div>
-                              <Link href={`/quotation/${event.id}`} className="bg-black text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-gray-800 transition">Open Quote</Link>
+                              <Link 
+                                href={`/quotation/${event.id}`} 
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                                  isEventClosed(event)
+                                    ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                                    : 'bg-black text-white hover:bg-gray-800'
+                                }`}
+                              >
+                                {isEventClosed(event) ? 'View Quote' : 'Open Quote'}
+                              </Link>
                             </div>
                           </td>
                         </tr>
@@ -409,49 +470,144 @@ export default function Dashboard() {
               </table>
             </div>
 
-            {/* Mobile Cards - Visible on Mobile */}
-            <div className="lg:hidden divide-y divide-gray-100">
+            {/* Mobile & Tablet Cards - Visible on Mobile and iPad/Tablets (< lg) */}
+            <div className="lg:hidden p-3 sm:p-4 bg-gray-50/50">
               {loading ? (
                 <div className="p-8 text-center text-gray-400 font-bold">Loading events...</div>
               ) : events.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 font-bold">No events found.</div>
               ) : (
-                events.map((event: any) => (
-                  <div key={event.id} className="p-4 bg-white space-y-3">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-bold text-gray-800 text-sm">{event.clients?.entity_name || 'Unknown Client'}</div>
-                        <div className="text-[10px] text-gray-400 font-bold mt-0.5">{event.event_code} • {new Date(event.event_date).toLocaleDateString()}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {events.map((event: any) => (
+                    <div key={event.id} className="p-4 bg-white rounded-xl border border-gray-200 shadow-2xs space-y-3 flex flex-col justify-between">
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-gray-900 text-sm truncate" title={event.clients?.entity_name || 'Unknown Client'}>
+                              {event.clients?.entity_name || 'Unknown Client'}
+                            </div>
+                            <div className="text-[10px] text-gray-400 font-bold mt-0.5">
+                              {event.event_code} • {new Date(event.event_date).toLocaleDateString('en-GB')}
+                            </div>
+                            {event.clients?.contact_person && (
+                              <div className="text-[10px] text-gray-500 font-medium">
+                                👤 {event.clients.contact_person}
+                              </div>
+                            )}
+                          </div>
+                          <div className="shrink-0">
+                            {getStatusBadge(event)}
+                          </div>
+                        </div>
+
                         {([event.venue_name, event.venue_address, event.city].filter(Boolean).length > 0) && (
-                          <div className="text-[11px] text-amber-900 font-semibold mt-1 flex items-start gap-1">
+                          <div className="text-[11px] text-amber-900 font-semibold flex items-start gap-1">
                             <span className="shrink-0">📍</span>
-                            <span>{[event.venue_name, event.venue_address, event.city, event.state, event.venue_zipcode ? 'PIN: ' + event.venue_zipcode : ''].filter(Boolean).join(', ')}</span>
+                            <span className="line-clamp-2">
+                              {[event.venue_name, event.venue_address, event.city, event.state, event.venue_zipcode ? 'PIN: ' + event.venue_zipcode : ''].filter(Boolean).join(', ')}
+                            </span>
                           </div>
                         )}
+
+                        <div className="bg-gray-50 p-2.5 rounded-lg text-xs text-gray-600 italic border border-gray-100">
+                          {event.internal_notes || 'No internal notes.'}
+                        </div>
                       </div>
-                      {getStatusBadge(event)}
-                    </div>
 
-                    <div className="bg-gray-50 p-2 rounded text-xs text-gray-600 italic">
-                      {event.internal_notes || 'No internal notes.'}
-                    </div>
+                      {/* Action Buttons Grid - All options preserved */}
+                      <div className="pt-2 border-t border-gray-100 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <Link 
+                            href={`/quotation/${event.id}`} 
+                            className={`py-2 px-3 rounded-lg text-xs font-bold text-center transition ${
+                              isEventClosed(event) ? 'bg-slate-200 text-slate-700' : 'bg-black text-white hover:bg-gray-800'
+                            }`}
+                          >
+                            {isEventClosed(event) ? 'View Quote' : 'Open Quote'}
+                          </Link>
+                          <Link 
+                            href={`/client-menu/${event.id}?preview=true`} 
+                            className="bg-blue-50 text-blue-700 py-2 px-3 rounded-lg text-xs font-bold text-center border border-blue-100 hover:bg-blue-100 transition"
+                          >
+                            Preview Menu
+                          </Link>
+                        </div>
 
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      <Link href={`/quotation/${event.id}`} className="bg-black text-white py-2 rounded-lg text-xs font-bold text-center">
-                        Open Quote
-                      </Link>
-                      <Link href={`/client-menu/${event.id}?preview=true`} className="bg-blue-50 text-blue-600 py-2 rounded-lg text-xs font-bold text-center border border-blue-100">
-                        Preview Menu
-                      </Link>
-                      <Link href={`/quotation/${event.id}?tab=settings`} className="bg-gray-100 text-gray-600 py-2 rounded-lg text-xs font-bold text-center border border-gray-200">
-                        Edit Details
-                      </Link>
-                      <button onClick={() => copyClientLink(event.id)} className="bg-gray-100 text-gray-600 py-2 rounded-lg text-xs font-bold text-center border border-gray-200">
-                        Copy Link
-                      </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          {!isEventClosed(event) ? (
+                            <Link 
+                              href={`/quotation/${event.id}?tab=settings`} 
+                              className="bg-gray-100 text-gray-700 py-2 px-3 rounded-lg text-xs font-bold text-center border border-gray-200 hover:bg-gray-200 transition"
+                            >
+                              Edit Details
+                            </Link>
+                          ) : (
+                            <div className="bg-gray-100 text-gray-400 py-2 px-3 rounded-lg text-xs font-bold text-center border border-gray-200 cursor-not-allowed">
+                              🔒 Event Closed
+                            </div>
+                          )}
+                          <button 
+                            type="button"
+                            onClick={() => handleToggleMenuLock(event)}
+                            disabled={isEventClosed(event)}
+                            className={`py-2 px-3 rounded-lg text-xs font-bold text-center border transition cursor-pointer ${
+                              isEventClosed(event)
+                                ? 'opacity-50 cursor-not-allowed bg-gray-50 text-gray-400'
+                                : event.menu_locked 
+                                ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' 
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {event.menu_locked ? '🔓 Unlock Edits' : '🔒 Lock Menu'}
+                          </button>
+                        </div>
+
+                        {/* Extra Actions Row (Copy Link, Approve Edit, Status) */}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => copyClientLink(event.id)}
+                            className="flex-1 py-1.5 px-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold rounded-lg border border-gray-200 text-center flex items-center justify-center gap-1 cursor-pointer"
+                            title="Copy Client Link"
+                          >
+                            <span>🔗</span> Copy Link
+                          </button>
+
+                          {!isEventClosed(event) && (event.quote_status === 'edit_requested' || event.status === 'edit_requested') && (
+                            <button
+                              type="button"
+                              onClick={() => handleApproveEdit(event.id)}
+                              className="flex-1 py-1.5 px-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-[11px] font-bold rounded-lg border border-purple-200 text-center cursor-pointer"
+                            >
+                              🔓 Approve
+                            </button>
+                          )}
+
+                          {!isEventClosed(event) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(event.id, 'confirmed')}
+                                className="py-1.5 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold rounded-lg border border-emerald-200 text-center cursor-pointer"
+                                title="Confirm Event"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(event.id, 'cancelled')}
+                                className="py-1.5 px-2.5 bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold rounded-lg border border-red-200 text-center cursor-pointer"
+                                title="Cancel Event"
+                              >
+                                ✕
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           </div>

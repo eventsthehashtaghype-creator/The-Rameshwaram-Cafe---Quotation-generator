@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/app/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getStatusDisplayInfo, isEventClosed } from '@/app/lib/eventStatus'
 
 const isEventLockedByDate = (eventDateStr: string) => {
   if (!eventDateStr) return false
@@ -124,104 +125,229 @@ export default function PortalDashboard() {
             </Link>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm min-h-[380px]">
-            <div className="overflow-x-auto min-h-[380px]">
-              <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Provisional Event Code</th>
-                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Date & Size</th>
-                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
-                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {events.map((event) => (
-                  <tr key={event.id} className="hover:bg-gray-50 transition">
-                    <td className="px-6 py-5">
-                      <div className="font-bold text-gray-800 text-sm">{event.event_code}</div>
-                      <div className="text-[10px] text-gray-400 font-bold mt-1 uppercase">{event.event_type || 'Event'}</div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="font-bold text-black text-sm">{new Date(event.event_date).toLocaleDateString('en-GB')}</div>
-                      <div className="text-[10px] text-gray-400 font-medium mt-1">{event.pax_count} Pax</div>
-                    </td>
-                    <td className="px-6 py-5">
-                      {event.status === 'draft' && event.quote_status !== 'edit_requested' && <span className="px-3 py-1 bg-gray-100 text-gray-600 text-[10px] font-black uppercase rounded tracking-wide border border-gray-200">Draft</span>}
-                      {(event.status === 'pending_admin_approval' || (event.quote_status === 'client_submitted' && event.status !== 'edit_requested')) && <span className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-black uppercase rounded tracking-wide border border-orange-100">Reviewing</span>}
-                      {event.status === 'sent' && <span className="px-3 py-1 bg-blue-50 text-blue-600 text-[10px] font-black uppercase rounded tracking-wide border border-blue-100">Quote Ready</span>}
-                      {event.status === 'confirmed' && <span className="px-3 py-1 bg-green-50 text-green-600 text-[10px] font-black uppercase rounded tracking-wide border border-green-100">Confirmed</span>}
-                      {event.status === 'cancelled' && <span className="px-3 py-1 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded tracking-wide border border-red-100">Cancelled</span>}
-                      {(event.status === 'edit_requested' || event.quote_status === 'edit_requested') && <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[10px] font-black uppercase rounded tracking-wide border border-purple-100">Edit Requested</span>}
-                      {event.menu_locked && <span className="ml-2 px-2.5 py-1 bg-amber-50 text-amber-700 text-[10px] font-black uppercase rounded tracking-wide border border-amber-200">🔒 Menu Locked</span>}
-                    </td>
-                    <td className="px-6 py-5 text-right">
-                        <div className="relative inline-block text-left group">
-                          <button className="p-2 text-gray-500 hover:text-black hover:bg-gray-100 rounded-full transition">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
-                          </button>
-                          
-                          <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 flex flex-col overflow-hidden">
-                            
-                            <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 border-b border-gray-100">
-                              Menu
-                            </div>
-                            <Link 
-                              href={`/client-menu/${event.id}?preview=true`} 
-                              className="px-4 py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-black transition"
-                            >
-                              📄 View / Download Menu
-                            </Link>
-
-                             {event.menu_locked ? (
-                              <button disabled className="px-4 py-3 text-xs font-bold text-left text-amber-700 bg-amber-50 cursor-not-allowed border-t border-gray-100 flex items-center gap-1.5">
-                                <span>🔒</span> Menu Locked by Admin
-                              </button>
-                            ) : isEventLockedByDate(event.event_date) ? (
-                              <button disabled className="px-4 py-3 text-xs font-bold text-left text-gray-400 bg-gray-50/50 cursor-not-allowed border-t border-gray-100">
-                                🔒 Editing Locked (within 2 days of event)
-                              </button>
-                            ) : (event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
-                              <button disabled className="px-4 py-3 text-xs font-bold text-left text-purple-400 bg-purple-50/50 cursor-not-allowed border-t border-gray-100">
-                                ⏳ Edit Requested
-                              </button>
-                            ) : (event.quote_status === 'client_submitted' || event.status === 'pending_admin_approval' || event.status === 'sent') ? (
-                              <button 
-                                onClick={() => handleRequestEdit(event.id)}
-                                className="px-4 py-3 text-xs font-bold text-left text-orange-600 hover:bg-orange-50 transition border-t border-gray-100"
-                              >
-                                ✏️ Request Edit
-                              </button>
-                            ) : (
-                              <Link 
-                                href={`/client-menu/${event.id}`} 
-                                className="px-4 py-3 text-xs font-bold text-blue-600 hover:bg-blue-50 transition border-t border-gray-100"
-                              >
-                                ✏️ Edit Selection
-                              </Link>
-                            )}
-
-                            {/* Quotation Downloads */}
-                            {(event.status === 'sent' || event.status === 'confirmed') && (
-                              <>
-                                <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 border-y border-gray-100">
-                                  Quotation
-                                </div>
-                                <button
-                                  onClick={() => window.open(`/quotation/${event.id}?client_preview=true`, '_blank')}
-                                  className="px-4 py-3 text-xs font-bold text-left text-gray-700 hover:bg-gray-50 hover:text-black transition"
-                                >
-                                  📥 Open Quote
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                    </td>
+          <div>
+            {/* DESKTOP TABLE (Hidden on Mobile/Tablet) */}
+            <div className="hidden lg:block bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm min-h-[380px]">
+              <div className="overflow-x-auto min-h-[380px]">
+                <table className="w-full text-left border-collapse min-w-[600px]">
+                  <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Provisional Event Code</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Date & Size</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {events.map((event) => (
+                    <tr key={event.id} className="hover:bg-gray-50 transition">
+                      <td className="px-6 py-5">
+                        <div className="font-bold text-gray-800 text-sm">{event.event_code}</div>
+                        <div className="text-[10px] text-gray-400 font-bold mt-1 uppercase">{event.event_type || 'Event'}</div>
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="font-bold text-black text-sm">{new Date(event.event_date).toLocaleDateString('en-GB')}</div>
+                        <div className="text-[10px] text-gray-400 font-medium mt-1">{event.pax_count} Pax</div>
+                      </td>
+                      <td className="px-6 py-5">
+                        {(() => {
+                          const statusInfo = getStatusDisplayInfo(event)
+                          return (
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className={`px-3 py-1 text-[10px] font-black uppercase rounded tracking-wide border ${statusInfo.badgeClass}`}>
+                                ● {statusInfo.label}
+                              </span>
+                              {event.menu_locked && (
+                                <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-bold rounded border border-amber-200">
+                                  🔒 Menu Locked
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })()}
+                      </td>
+                      <td className="px-6 py-5 text-right">
+                          <div className="relative inline-block text-left group">
+                            <button className="p-2 text-gray-500 hover:text-black hover:bg-gray-100 rounded-full transition cursor-pointer">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
+                            </button>
+                            
+                            <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 flex flex-col overflow-hidden">
+                              
+                              <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 border-b border-gray-100">
+                                Menu
+                              </div>
+                              <Link 
+                                href={`/client-menu/${event.id}?preview=true`} 
+                                className="px-4 py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-black transition"
+                              >
+                                📄 View / Download Menu
+                              </Link>
+
+                               {isEventClosed(event) ? (
+                                <button disabled className="px-4 py-3 text-xs font-bold text-left text-gray-400 bg-gray-50/50 cursor-not-allowed border-t border-gray-100">
+                                  🔒 Event Closed
+                                </button>
+                              ) : event.menu_locked ? (
+                                <button disabled className="px-4 py-3 text-xs font-bold text-left text-amber-700 bg-amber-50 cursor-not-allowed border-t border-gray-100 flex items-center gap-1.5">
+                                  <span>🔒</span> Menu Locked by Admin
+                                </button>
+                              ) : (event.menu_locked === false) ? (
+                                <Link 
+                                  href={`/client-menu/${event.id}`} 
+                                  className="px-4 py-3 text-xs font-bold text-blue-600 hover:bg-blue-50 transition border-t border-gray-100"
+                                >
+                                  ✏️ Edit Selection
+                                </Link>
+                              ) : isEventLockedByDate(event.event_date) ? (
+                                <button disabled className="px-4 py-3 text-xs font-bold text-left text-gray-400 bg-gray-50/50 cursor-not-allowed border-t border-gray-100">
+                                  🔒 Editing Locked (within 2 days of event)
+                                </button>
+                              ) : (event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
+                                <button disabled className="px-4 py-3 text-xs font-bold text-left text-purple-400 bg-purple-50/50 cursor-not-allowed border-t border-gray-100">
+                                  ⏳ Edit Requested
+                                </button>
+                              ) : (event.quote_status === 'client_submitted' || event.status === 'pending_admin_approval' || event.status === 'sent') ? (
+                                <button 
+                                  onClick={() => handleRequestEdit(event.id)}
+                                  className="px-4 py-3 text-xs font-bold text-left text-orange-600 hover:bg-orange-50 transition border-t border-gray-100 cursor-pointer"
+                                >
+                                  ✏️ Request Edit
+                                </button>
+                              ) : (
+                                <Link 
+                                  href={`/client-menu/${event.id}`} 
+                                  className="px-4 py-3 text-xs font-bold text-blue-600 hover:bg-blue-50 transition border-t border-gray-100"
+                                >
+                                  ✏️ Edit Selection
+                                </Link>
+                              )}
+
+                              {/* Quotation Downloads */}
+                              {(event.status === 'sent' || event.status === 'confirmed') && (
+                                <>
+                                  <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 border-y border-gray-100">
+                                    Quotation
+                                  </div>
+                                  <button
+                                    onClick={() => window.open(`/quotation/${event.id}?client_preview=true`, '_blank')}
+                                    className="px-4 py-3 text-xs font-bold text-left text-gray-700 hover:bg-gray-50 hover:text-black transition cursor-pointer"
+                                  >
+                                    📥 Open Quote
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </div>
+
+            {/* MOBILE / TABLET CARDS (Visible on < lg) */}
+            <div className="lg:hidden space-y-4">
+              {events.map((event) => {
+                const statusInfo = getStatusDisplayInfo(event)
+                const isClosed = isEventClosed(event)
+
+                return (
+                  <div key={event.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">{event.event_type || 'Event'}</span>
+                        <h3 className="font-black text-gray-900 text-lg">{event.event_code}</h3>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={`px-2.5 py-1 text-[10px] font-black uppercase rounded tracking-wide border ${statusInfo.badgeClass}`}>
+                          ● {statusInfo.label}
+                        </span>
+                        {event.menu_locked && (
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-bold rounded border border-amber-200">
+                            🔒 Menu Locked
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase block">Event Date</span>
+                        <span className="font-bold text-gray-900">{new Date(event.event_date).toLocaleDateString('en-GB')}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase block">Guest Count</span>
+                        <span className="font-bold text-gray-900">{event.pax_count} Pax</span>
+                      </div>
+                    </div>
+
+                    {/* Touch-Friendly Action Buttons Stack */}
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/client-menu/${event.id}?preview=true`}
+                          className="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-800 py-2.5 rounded-xl text-xs font-bold transition shadow-2xs"
+                        >
+                          📄 View / Download Menu
+                        </Link>
+
+                        {(event.status === 'sent' || event.status === 'confirmed') && (
+                          <button
+                            onClick={() => window.open(`/quotation/${event.id}?client_preview=true`, '_blank')}
+                            className="flex-1 bg-black hover:bg-gray-800 text-white py-2.5 rounded-xl text-xs font-bold transition shadow-2xs text-center cursor-pointer"
+                          >
+                            📥 Open Quote
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Edit / Status button */}
+                      <div>
+                        {isClosed ? (
+                          <div className="text-center text-xs font-bold text-gray-400 py-2 bg-gray-50 rounded-xl">
+                            🔒 Event Closed (Archived)
+                          </div>
+                        ) : event.menu_locked ? (
+                          <div className="text-center text-xs font-bold text-amber-700 py-2 bg-amber-50 rounded-xl border border-amber-200">
+                            🔒 Menu Locked by Administrator
+                          </div>
+                        ) : (event.menu_locked === false) ? (
+                          <Link
+                            href={`/client-menu/${event.id}`}
+                            className="block text-center w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-xs font-bold transition shadow-2xs"
+                          >
+                            ✏️ Edit Selection
+                          </Link>
+                        ) : isEventLockedByDate(event.event_date) ? (
+                          <div className="text-center text-xs font-bold text-gray-400 py-2 bg-gray-50 rounded-xl">
+                            🔒 Editing Locked (within 2 days of event)
+                          </div>
+                        ) : (event.quote_status === 'edit_requested' || event.status === 'edit_requested') ? (
+                          <div className="text-center text-xs font-bold text-purple-600 py-2 bg-purple-50 rounded-xl border border-purple-200">
+                            ⏳ Edit Requested (Pending Admin)
+                          </div>
+                        ) : (event.quote_status === 'client_submitted' || event.status === 'pending_admin_approval' || event.status === 'sent') ? (
+                          <button
+                            onClick={() => handleRequestEdit(event.id)}
+                            className="w-full bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer"
+                          >
+                            ✏️ Request Edit
+                          </button>
+                        ) : (
+                          <Link
+                            href={`/client-menu/${event.id}`}
+                            className="block text-center w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-xs font-bold transition shadow-2xs"
+                          >
+                            ✏️ Edit Selection
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

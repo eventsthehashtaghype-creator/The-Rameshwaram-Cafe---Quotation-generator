@@ -40,6 +40,15 @@ export interface QuotationSnapshot {
     text: string
     selected: boolean
   }>
+  annexure_c?: {
+    enabled: boolean
+    rows: Array<{
+      id: string
+      meal: string
+      timings: string
+      charges: string
+    }>
+  }
   financials: {
     grandTotal: number
     gst: number
@@ -261,6 +270,7 @@ export async function restoreQuotationVersion(params: {
       poc_mobile: snap.event.pocMobile,
       poc_email: snap.event.pocEmail,
       terms_and_conditions: snap.terms,
+      annexure_c: snap.annexure_c,
     }).eq('id', eventId)
   } catch (e) {
     console.error('Error restoring event row in Supabase:', e)

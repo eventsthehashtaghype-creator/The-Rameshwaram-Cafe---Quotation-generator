@@ -3,7 +3,8 @@ import { useState, useEffect, Suspense } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/app/lib/supabase'
 import { logActivity } from '@/app/lib/audit'
-import { MenuPreset, getAllPresets, saveCustomPreset, deleteCustomPreset } from '@/app/lib/presets'
+import { MenuPreset, getAllPresets, fetchAllPresets } from '@/app/lib/presets'
+import { isEventClosed } from '@/app/lib/eventStatus'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -28,6 +29,7 @@ function ClientMenuContent() {
     const [allowEdit, setAllowEdit] = useState(false)
     const [isLockedByDate, setIsLockedByDate] = useState(false)
     const [isMenuLockedByAdmin, setIsMenuLockedByAdmin] = useState(false)
+    const [isEventConcluded, setIsEventConcluded] = useState(false)
 
     // DATA STATE
     const [menuData, setMenuData] = useState<MenuCategory[]>([])
@@ -44,13 +46,15 @@ function ClientMenuContent() {
 
     // PRESET MENUS STATE
     const [presets, setPresets] = useState<MenuPreset[]>([])
-    const [isSavePresetModalOpen, setIsSavePresetModalOpen] = useState(false)
-    const [newPresetName, setNewPresetName] = useState('')
-    const [newPresetDesc, setNewPresetDesc] = useState('')
     const [presetToast, setPresetToast] = useState<string | null>(null)
 
     useEffect(() => {
         setPresets(getAllPresets())
+        fetchAllPresets().then(data => {
+            if (data && data.length > 0) {
+                setPresets(data)
+            }
+        })
     }, [])
 
     // 1. FETCH DATA
@@ -60,6 +64,7 @@ function ClientMenuContent() {
 
             // A. Fetch Event
             let dateLocked = false
+            let concluded = false
             const { data: eventData } = await supabase.from('events').select('*, clients(*)').eq('id', id).single()
             if (eventData) {
                 setEvent(eventData)
@@ -69,11 +74,26 @@ function ClientMenuContent() {
                 limitDate.setDate(limitDate.getDate() - 2)
                 const today = new Date()
                 dateLocked = today >= limitDate
-                setIsLockedByDate(dateLocked)
+                concluded = isEventClosed(eventData)
+                setIsEventConcluded(concluded)
                 const adminLocked = eventData.menu_locked === true
                 setIsMenuLockedByAdmin(adminLocked)
 
-                const isLocked = dateLocked || adminLocked || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
+                // Decision: If event concluded -> locked.
+                // If menu_locked is explicitly true -> locked to client.
+                // If menu_locked is explicitly false -> unlocked by admin, client CAN edit!
+                // Otherwise fall back to date/status.
+                let isLocked = false
+                if (concluded) {
+                    isLocked = true
+                } else if (eventData.menu_locked === true) {
+                    isLocked = true
+                } else if (eventData.menu_locked === false) {
+                    isLocked = false
+                } else {
+                    isLocked = dateLocked || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)
+                }
+
                 if (isLocked && !isPreview) setSubmitted(true) // Block editing if already submitted/locked
 
                 // Calculate Days
@@ -109,7 +129,7 @@ function ClientMenuContent() {
             let restoredFromLocal = false
             const localConfig = localStorage.getItem(`menu_config_${id}`)
             const localSels = localStorage.getItem(`menu_sels_${id}`)
-            const isLocked = eventData ? (dateLocked || eventData.menu_locked === true || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)) : false
+            const isLocked = eventData ? (concluded || eventData.menu_locked === true || (eventData.menu_locked === false ? false : (dateLocked || ['client_submitted', 'edit_requested'].includes(eventData.quote_status) || ['pending_admin_approval', 'sent', 'confirmed', 'cancelled', 'edit_requested'].includes(eventData.status)))) : false
 
             if (localConfig && localSels && !isLocked) {
                 try {
@@ -179,8 +199,9 @@ function ClientMenuContent() {
     }
 
     const handleAddCustomItem = () => {
-        if (!activeSession || event?.menu_locked) {
-            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+        if (!activeSession || isEventConcluded || event?.menu_locked) {
+            if (isEventConcluded) alert("Event is closed. Menu cannot be modified.")
+            else if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
             return
         }
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
@@ -203,8 +224,9 @@ function ClientMenuContent() {
     }
 
     const removeCustomItem = (name: string) => {
-        if (!activeSession || event?.menu_locked) {
-            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+        if (!activeSession || isEventConcluded || event?.menu_locked) {
+            if (isEventConcluded) alert("Event is closed. Menu cannot be modified.")
+            else if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
             return
         }
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
@@ -223,8 +245,9 @@ function ClientMenuContent() {
     }
 
     const applyPreset = (preset: MenuPreset, dayIndex: number, categoryId: string, replace: boolean = true) => {
-        if (event?.menu_locked) {
-            alert("Menu is locked by administrator. Changes cannot be made.")
+        if (isEventConcluded || event?.menu_locked) {
+            if (isEventConcluded) alert("Event is closed. Menu cannot be modified.")
+            else alert("Menu is locked by administrator. Changes cannot be made.")
             return
         }
         const key = getSessionKey(dayIndex, categoryId)
@@ -239,56 +262,15 @@ function ClientMenuContent() {
     }
 
     const clearActiveSessionItems = () => {
-        if (!activeSession || event?.menu_locked) {
-            if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
+        if (!activeSession || isEventConcluded || event?.menu_locked) {
+            if (isEventConcluded) alert("Event is closed. Menu cannot be modified.")
+            else if (event?.menu_locked) alert("Menu is locked by administrator. Changes cannot be made.")
             return
         }
         if (!confirm("Clear all selected items for this session?")) return
         const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
         setMenuSelections(prev => ({ ...prev, [key]: [] }))
         showPresetToast("Cleared all selected items for this session")
-    }
-
-    const handleSaveCurrentAsPreset = () => {
-        if (!activeSession) return
-        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
-        const items = menuSelections[key] || []
-        if (items.length === 0) {
-            alert("Please select at least one item before saving as a preset.")
-            return
-        }
-        if (!newPresetName.trim()) {
-            alert("Please enter a name for your preset menu.")
-            return
-        }
-
-        const activeCat = menuData.find(c => c.id === activeSession.categoryId)
-        const catUpper = (activeCat?.title || '').toUpperCase()
-        const mealCat = (catUpper.includes('BREAKFAST') ? 'BREAKFAST'
-            : catUpper.includes('LUNCH') ? 'LUNCH'
-            : catUpper.includes('HI-TEA') || catUpper.includes('TEA') ? 'HI-TEA'
-            : catUpper.includes('DINNER') ? 'DINNER'
-            : 'ALL') as any
-
-        saveCustomPreset({
-            name: newPresetName.trim(),
-            description: newPresetDesc.trim() || `Custom preset for ${activeCat?.title || 'Session'} with ${items.length} items`,
-            mealCategory: mealCat,
-            items: [...items],
-        })
-
-        setPresets(getAllPresets())
-        setIsSavePresetModalOpen(false)
-        setNewPresetName('')
-        setNewPresetDesc('')
-        showPresetToast(`Saved preset "${newPresetName.trim()}" successfully!`)
-    }
-
-    const handleDeleteCustomPreset = (presetId: string, name: string) => {
-        if (!confirm(`Delete custom preset "${name}"?`)) return
-        deleteCustomPreset(presetId)
-        setPresets(getAllPresets())
-        showPresetToast(`Deleted preset "${name}"`)
     }
 
     const toggleMenuItem = (item: string, station?: any) => {
@@ -815,14 +797,24 @@ function ClientMenuContent() {
         )
     }
 
-    if (submitted && !isPreview && !allowEdit) return <SuccessScreen onEdit={() => { if (!isMenuLockedByAdmin && !isLockedByDate) setAllowEdit(true); }} eventId={id as string} isLockedByDate={isLockedByDate} isMenuLockedByAdmin={isMenuLockedByAdmin} />
+    if (submitted && !isPreview && !allowEdit) return <SuccessScreen onEdit={() => { if (!isEventConcluded && !isMenuLockedByAdmin) setAllowEdit(true); }} eventId={id as string} isLockedByDate={isLockedByDate} isMenuLockedByAdmin={isMenuLockedByAdmin} isEventConcluded={isEventConcluded} />
     if (loading || !event) return <div className="h-screen flex items-center justify-center font-bold text-gray-400">Loading Planner...</div>
 
     return (
         <div className="min-h-screen bg-gray-50 font-sans text-black pb-32">
-            {isMenuLockedByAdmin && !isPreview && (
+            {isEventConcluded && !isPreview && (
+                <div className="bg-slate-900 text-slate-100 px-4 py-2.5 text-center text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 sticky top-0 z-[100] shadow-md">
+                    <span>🔒</span> Event Closed — This event has concluded and the menu is permanently archived.
+                </div>
+            )}
+            {!isEventConcluded && isMenuLockedByAdmin && !isPreview && (
                 <div className="bg-amber-600 text-white px-4 py-2.5 text-center text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 sticky top-0 z-[100] shadow-md">
                     <span>🔒</span> Menu Locked by Administrator — No changes can be made.
+                </div>
+            )}
+            {!isEventConcluded && !isMenuLockedByAdmin && event?.menu_locked === false && !isPreview && (
+                <div className="bg-emerald-600 text-white px-4 py-2 text-center text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 sticky top-0 z-[100] shadow-sm">
+                    <span>🔓</span> Menu Unlocked for Editing — You can modify your menu selections.
                 </div>
             )}
             <Header event={event} />
@@ -990,28 +982,45 @@ function ClientMenuContent() {
                                         </div>
 
                                         {!isFixedMenu && (
-                                            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-2" onClick={e => e.stopPropagation()}>
-                                                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1">
-                                                    <span>⚡</span> Preset:
-                                                </span>
-                                                <select
-                                                    className="text-xs font-bold bg-amber-50 text-amber-900 border border-amber-200 rounded-lg px-2.5 py-1.5 outline-none hover:bg-amber-100 transition cursor-pointer max-w-[170px] truncate"
-                                                    defaultValue=""
-                                                    onChange={(e) => {
-                                                        const p = presets.find(pr => pr.id === e.target.value)
-                                                        if (p) {
-                                                            applyPreset(p, dayIndex, catId)
-                                                            e.target.value = ""
-                                                        }
-                                                    }}
-                                                >
-                                                    <option value="" disabled>Choose Preset...</option>
-                                                    {presets.map(p => (
-                                                        <option key={p.id} value={p.id}>
-                                                            {p.name} ({p.items.length} items)
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                            <div className="mt-6 pt-3 border-t border-gray-100 flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-black text-amber-900/80 uppercase tracking-wider flex items-center gap-1">
+                                                        <span>⚡</span> 1-Click Import Preset:
+                                                    </span>
+                                                </div>
+                                                <div className="relative w-full">
+                                                    <select
+                                                        className="w-full text-xs font-bold bg-amber-50/90 text-amber-950 border border-amber-300/80 rounded-xl px-3 py-2 outline-none hover:bg-amber-100/70 focus:ring-2 focus:ring-amber-500 transition cursor-pointer appearance-none pr-8 truncate shadow-2xs"
+                                                        defaultValue=""
+                                                        onChange={(e) => {
+                                                            const p = presets.find(pr => pr.id === e.target.value)
+                                                            if (p) {
+                                                                applyPreset(p, dayIndex, catId)
+                                                                e.target.value = ""
+                                                            }
+                                                        }}
+                                                    >
+                                                        <option value="" disabled>Choose Package Preset...</option>
+                                                        {(() => {
+                                                            const catUpper = (cat?.title || '').toUpperCase()
+                                                            const sorted = [...presets].sort((a, b) => {
+                                                                const aMatches = a.mealCategory === 'ALL' || catUpper.includes(a.mealCategory)
+                                                                const bMatches = b.mealCategory === 'ALL' || catUpper.includes(b.mealCategory)
+                                                                if (aMatches && !bMatches) return -1
+                                                                if (!aMatches && bMatches) return 1
+                                                                return 0
+                                                            })
+                                                            return sorted.map(p => (
+                                                                <option key={p.id} value={p.id}>
+                                                                    {p.name} ({p.items.length} items)
+                                                                </option>
+                                                            ))
+                                                        })()}
+                                                    </select>
+                                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-amber-900 text-xs font-black">
+                                                        ▼
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -1023,241 +1032,495 @@ function ClientMenuContent() {
                     </div>
                 )}
                 {/* STEP 3: ITEM SELECTION (MODAL VIEW) */}
-                {step === 3 && activeSession && (
-                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] overflow-y-auto animate-in fade-in duration-300">
-                        <div className="min-h-screen flex items-end md:items-center justify-center md:p-4">
-                            <div className="bg-white w-full md:max-w-4xl rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-300 relative h-[90vh] md:h-auto flex flex-col">
+                {step === 3 && activeSession && (() => {
+                    const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
+                    const currentItems = menuSelections[key] || []
+                    const activeCat = menuData.find(c => c.id === activeSession.categoryId)
+                    const catTitleUpper = (activeCat?.title || '').toUpperCase()
+                    const hasSelectedItems = currentItems.length > 0
 
-                                <div className="sticky top-0 bg-white/95 backdrop-blur border-b border-gray-100 p-4 md:p-6 flex justify-between items-center z-10 shrink-0">
+                    const sortedPresets = [...presets].sort((a, b) => {
+                        const aMatches = a.mealCategory === 'ALL' || catTitleUpper.includes(a.mealCategory)
+                        const bMatches = b.mealCategory === 'ALL' || catTitleUpper.includes(b.mealCategory)
+                        if (aMatches && !bMatches) return -1
+                        if (!aMatches && bMatches) return 1
+                        return 0
+                    })
+
+                    const activePreset = sortedPresets.find(preset => {
+                        if (preset.items.length === 0) return false
+                        const matchCount = preset.items.filter(i => currentItems.includes(i)).length
+                        return matchCount === preset.items.length && currentItems.length === preset.items.length
+                    }) || sortedPresets.find(preset => {
+                        if (preset.items.length === 0) return false
+                        const matchCount = preset.items.filter(i => currentItems.includes(i)).length
+                        return matchCount === preset.items.length
+                    })
+
+                    const stationsWithSelection = (activeCat?.stations || []).map(station => {
+                        const selectedInStation = station.items.filter((it: any) => currentItems.includes(it.name))
+                        return {
+                            station,
+                            items: selectedInStation
+                        }
+                    }).filter(g => g.items.length > 0)
+
+                    const dbItemNames = new Set((activeCat?.stations || []).flatMap((s: any) => s.items.map((i: any) => i.name)))
+                    const categoryCustomItems = currentItems.filter(name => !dbItemNames.has(name))
+
+                    const renderPresetBar = () => (
+                        <div className="bg-gradient-to-r from-amber-50 via-orange-50/50 to-amber-50 border border-amber-200/80 rounded-2xl p-4 md:p-5 shadow-xs space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-2xl">⚡</span>
                                     <div>
-                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Day {activeSession.dayIndex + 1} • {eventDays[activeSession.dayIndex]}</span>
-                                        <h1 className="text-xl md:text-2xl font-black text-gray-900 uppercase tracking-tight truncate max-w-[200px] md:max-w-md">
-                                            {menuData.find(c => c.id === activeSession.categoryId)?.title}
-                                        </h1>
+                                        <h4 className="text-sm font-black text-amber-950 uppercase tracking-wide">
+                                            Quick Preset Menus
+                                        </h4>
+                                        <p className="text-xs text-amber-900/70 font-medium">
+                                            Select a preset to auto-populate frequent combinations. All items remain 100% customisable!
+                                        </p>
                                     </div>
-                                    <button onClick={() => setStep(2)} className="bg-black text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-gray-800 transition-colors shadow-lg">
-                                        Done
-                                    </button>
                                 </div>
 
-                                <div className="p-4 md:p-8 space-y-8 md:space-y-10 pb-20 overflow-y-auto flex-1 bg-gray-50">
-                                    {/* PRESET MENUS BAR */}
-                                    {(() => {
-                                        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
-                                        const currentItems = menuSelections[key] || []
-                                        const activeCat = menuData.find(c => c.id === activeSession.categoryId)
-                                        const catTitleUpper = (activeCat?.title || '').toUpperCase()
+                                <div className="flex items-center gap-2 shrink-0">
+                                    {currentItems.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={clearActiveSessionItems}
+                                            className="bg-white hover:bg-red-50 text-red-600 border border-red-200 px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-2xs"
+                                            title="Clear all selected items for this session"
+                                        >
+                                            Clear All
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
 
-                                        const sortedPresets = [...presets].sort((a, b) => {
-                                            const aMatches = a.mealCategory === 'ALL' || catTitleUpper.includes(a.mealCategory)
-                                            const bMatches = b.mealCategory === 'ALL' || catTitleUpper.includes(b.mealCategory)
-                                            if (aMatches && !bMatches) return -1
-                                            if (!aMatches && bMatches) return 1
-                                            return 0
-                                        })
+                            {/* Presets flex/scroll */}
+                            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 no-scrollbar">
+                                {sortedPresets.map(preset => {
+                                    const selectedCount = preset.items.filter(i => currentItems.includes(i)).length
+                                    const isFullySelected = selectedCount === preset.items.length && preset.items.length > 0
 
-                                        return (
-                                            <div className="bg-gradient-to-r from-amber-50 via-orange-50/50 to-amber-50 border border-amber-200/80 rounded-2xl p-4 md:p-5 shadow-sm space-y-3">
-                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                                    <div className="flex items-center gap-2.5">
-                                                        <span className="text-2xl">⚡</span>
-                                                        <div>
-                                                            <h4 className="text-sm font-black text-amber-950 uppercase tracking-wide">
-                                                                Quick Preset Menus
-                                                            </h4>
-                                                            <p className="text-xs text-amber-900/70 font-medium">
-                                                                Select a preset to auto-populate frequent combinations. All items remain 100% customisable!
-                                                            </p>
-                                                        </div>
-                                                    </div>
+                                    return (
+                                        <div
+                                            key={preset.id}
+                                            className={`shrink-0 flex items-center rounded-xl border transition-all ${
+                                                isFullySelected
+                                                    ? 'bg-amber-900 text-white border-amber-950 shadow-md ring-2 ring-amber-400'
+                                                    : 'bg-white hover:bg-amber-100/80 border-amber-200 text-slate-800'
+                                            }`}
+                                        >
+                                            <button
+                                                type="button"
+                                                onClick={() => applyPreset(preset, activeSession.dayIndex, activeSession.categoryId)}
+                                                className="px-3.5 py-2 text-left flex flex-col justify-center cursor-pointer"
+                                                title={preset.description}
+                                            >
+                                                <span className="text-xs font-black leading-tight flex items-center gap-1.5">
+                                                    <span>🍽️</span> {preset.name}
+                                                </span>
+                                                <span className={`text-[10px] font-bold ${isFullySelected ? 'text-amber-200' : 'text-slate-500'}`}>
+                                                    {preset.items.length} items {selectedCount > 0 && !isFullySelected ? `(${selectedCount} active)` : ''} • Click to import
+                                                </span>
+                                            </button>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )
 
-                                                    <div className="flex items-center gap-2 shrink-0">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setIsSavePresetModalOpen(true)}
-                                                            disabled={currentItems.length === 0}
-                                                            className="bg-amber-900 text-white hover:bg-black px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                            title="Save current selected items as a new custom preset"
-                                                        >
-                                                            <span>⭐</span> Save Current as Preset
-                                                        </button>
-                                                        {currentItems.length > 0 && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={clearActiveSessionItems}
-                                                                className="bg-white hover:bg-red-50 text-red-600 border border-red-200 px-3.5 py-1.5 rounded-xl text-xs font-bold transition"
-                                                                title="Clear all selected items for this session"
-                                                            >
-                                                                Clear All
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
+                    const renderStationsList = () => (
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between px-1">
+                                <span className="text-xs font-black text-gray-500 uppercase tracking-wider">
+                                    Station Categories ({activeCat?.stations?.length || 0})
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next: Record<string, boolean> = {}
+                                            activeCat?.stations.forEach(s => { next[s.id] = true })
+                                            setExpandedStations(prev => ({ ...prev, ...next }))
+                                        }}
+                                        className="text-[11px] font-bold text-gray-600 hover:text-black bg-white hover:bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg transition"
+                                    >
+                                        Expand All
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next: Record<string, boolean> = {}
+                                            activeCat?.stations.forEach(s => { next[s.id] = false })
+                                            setExpandedStations(prev => ({ ...prev, ...next }))
+                                        }}
+                                        className="text-[11px] font-bold text-gray-600 hover:text-black bg-white hover:bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg transition"
+                                    >
+                                        Collapse All
+                                    </button>
+                                </div>
+                            </div>
 
-                                                {/* Presets flex/scroll */}
-                                                <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 no-scrollbar">
-                                                    {sortedPresets.map(preset => {
-                                                        const selectedCount = preset.items.filter(i => currentItems.includes(i)).length
-                                                        const isFullySelected = selectedCount === preset.items.length && preset.items.length > 0
+                            {activeCat?.stations.map(station => {
+                                const isExpanded = expandedStations[station.id]
+                                const selectedInStation = station.items.filter((it: any) => currentItems.includes(it.name))
+                                return (
+                                    <div key={station.id} className="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
+                                        <div
+                                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                                            onClick={() => toggleStation(station.id)}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <h3 className="font-black text-lg md:text-xl text-gray-900">{station.name}</h3>
+                                                <span className="text-[9px] font-black bg-gray-200 text-gray-600 px-2 py-1 rounded tracking-wider uppercase inline-block">
+                                                    {station.selection_type}
+                                                </span>
+                                                {selectedInStation.length > 0 && (
+                                                    <span className="text-[10px] font-black bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">
+                                                        {selectedInStation.length} selected
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className={`transform transition-transform text-gray-400 font-bold ${isExpanded ? 'rotate-180' : ''}`}>▼</div>
+                                        </div>
 
+                                        {isExpanded && (
+                                            <div className="p-4 border-t border-gray-100 bg-gray-50">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    {station.items.map((item: any) => {
+                                                        const isSelected = currentItems.includes(item.name)
                                                         return (
                                                             <div
-                                                                key={preset.id}
-                                                                className={`shrink-0 flex items-center rounded-xl border transition-all ${
-                                                                    isFullySelected
-                                                                        ? 'bg-amber-900 text-white border-amber-950 shadow-md ring-2 ring-amber-400'
-                                                                        : 'bg-white hover:bg-amber-100/80 border-amber-200 text-slate-800'
+                                                                key={item.id}
+                                                                onClick={() => toggleMenuItem(item.name, station)}
+                                                                className={`p-3 md:p-4 rounded-lg border-2 cursor-pointer flex items-center gap-3 md:gap-4 transition-all duration-200 group ${
+                                                                    isSelected
+                                                                        ? 'bg-black text-white border-black shadow-lg'
+                                                                        : 'bg-white border-gray-200 hover:border-gray-400 hover:shadow-xs'
                                                                 }`}
                                                             >
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => applyPreset(preset, activeSession.dayIndex, activeSession.categoryId)}
-                                                                    className="px-3.5 py-2 text-left flex flex-col justify-center"
-                                                                    title={preset.description}
-                                                                >
-                                                                    <span className="text-xs font-black leading-tight flex items-center gap-1.5">
-                                                                        {preset.isCustom ? '⭐' : '🍽️'} {preset.name}
-                                                                    </span>
-                                                                    <span className={`text-[10px] font-bold ${isFullySelected ? 'text-amber-200' : 'text-slate-500'}`}>
-                                                                        {preset.items.length} items {selectedCount > 0 && !isFullySelected ? `(${selectedCount} active)` : ''} • Click to apply
-                                                                    </span>
-                                                                </button>
-                                                                {preset.isCustom && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation()
-                                                                            handleDeleteCustomPreset(preset.id, preset.name)
-                                                                        }}
-                                                                        className="px-2.5 py-2 text-red-500 hover:text-red-700 text-xs font-bold border-l border-amber-200/60"
-                                                                        title="Delete custom preset"
-                                                                    >
-                                                                        ✕
-                                                                    </button>
-                                                                )}
+                                                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
+                                                                    isSelected ? 'border-white' : 'border-gray-300 group-hover:border-gray-400'
+                                                                }`}>
+                                                                    {isSelected && <div className="w-2.5 h-2.5 bg-white rounded-full" />}
+                                                                </div>
+                                                                <span className={`font-bold text-sm leading-tight ${isSelected ? 'text-white' : 'text-gray-700'}`}>
+                                                                    {item.name}
+                                                                </span>
                                                             </div>
                                                         )
                                                     })}
                                                 </div>
                                             </div>
-                                        )
-                                    })()}
+                                        )}
+                                    </div>
+                                )
+                            })}
 
-                                    {menuData.find(c => c.id === activeSession.categoryId)?.stations.map(station => {
-                                        const isExpanded = expandedStations[station.id]
-                                        return (
-                                            <div key={station.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-4">
+                            {/* Pseudo-station for custom items */}
+                            <div className="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
+                                <div className="p-4 bg-gray-50/50 border-b border-gray-200 flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="font-black text-lg text-gray-900">Custom Items / Special Requests</h3>
+                                    </div>
+                                </div>
+                                <div className="p-4 bg-white space-y-4">
+                                    {categoryCustomItems.length > 0 ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            {categoryCustomItems.map((item) => (
                                                 <div
-                                                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                                                    onClick={() => toggleStation(station.id)}
+                                                    key={item}
+                                                    className="p-3 md:p-4 rounded-lg border-2 cursor-default flex items-center justify-between bg-black text-white border-black shadow-lg"
                                                 >
-                                                    <div className="flex items-center gap-3">
-                                                        <h3 className="font-black text-lg md:text-xl text-gray-900">{station.name}</h3>
-                                                        <span className="text-[9px] font-black bg-gray-200 text-gray-600 px-2 py-1 rounded tracking-wider uppercase inline-block">{station.selection_type}</span>
-                                                    </div>
-                                                    <div className={`transform transition-transform text-gray-400 font-bold ${isExpanded ? 'rotate-180' : ''}`}>▼</div>
+                                                    <span className="font-bold text-sm leading-tight text-white">{item}</span>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => removeCustomItem(item)}
+                                                        className="text-red-400 hover:text-red-600 font-bold text-xs cursor-pointer tracking-wider uppercase ml-2 bg-transparent border-0"
+                                                    >
+                                                        Remove
+                                                    </button>
                                                 </div>
-
-                                                {isExpanded && (
-                                                    <div className="p-4 border-t border-gray-100 bg-gray-50">
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                            {station.items.map((item: any) => {
-                                                                const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
-                                                                const isSelected = (menuSelections[key] || []).includes(item.name)
-                                                                return (
-                                                                    <div
-                                                                        key={item.id}
-                                                                        onClick={() => toggleMenuItem(item.name, station)}
-                                                                        className={`p-3 md:p-4 rounded-lg border-2 cursor-pointer flex items-center gap-3 md:gap-4 transition-all duration-200 group ${isSelected ? 'bg-black text-white border-black shadow-lg' : 'bg-white border-gray-200 hover:border-gray-400 hover:shadow-sm'}`}
-                                                                    >
-                                                                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'border-white' : 'border-gray-300 group-hover:border-gray-400'}`}>
-                                                                            {isSelected && <div className="w-2.5 h-2.5 bg-white rounded-full" />}
-                                                                        </div>
-                                                                        <span className={`font-bold text-sm leading-tight ${isSelected ? 'text-white' : 'text-gray-700'}`}>{item.name}</span>
-                                                                    </div>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )
-                                    })}
-
-                                    {/* Pseudo-station for custom items */}
-                                    {(() => {
-                                        const activeCategory = menuData.find(c => c.id === activeSession.categoryId)
-                                        const dbItemNames = new Set(activeCategory?.stations.flatMap((s: any) => s.items.map((i: any) => i.name)) || [])
-                                        const key = getSessionKey(activeSession.dayIndex, activeSession.categoryId)
-                                        const selectedItems = menuSelections[key] || []
-                                        const categoryCustomItems = selectedItems.filter(name => !dbItemNames.has(name))
-
-                                        return (
-                                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-4">
-                                                <div className="p-4 bg-gray-50/50 border-b border-gray-200 flex justify-between items-center">
-                                                    <div className="flex items-center gap-3">
-                                                        <h3 className="font-black text-lg text-gray-900">Custom Items / Special Requests</h3>
-                                                    </div>
-                                                </div>
-                                                <div className="p-4 bg-white space-y-4">
-                                                    {categoryCustomItems.length > 0 ? (
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                            {categoryCustomItems.map((item) => (
-                                                                <div
-                                                                    key={item}
-                                                                    className="p-3 md:p-4 rounded-lg border-2 cursor-default flex items-center justify-between bg-black text-white border-black shadow-lg"
-                                                                >
-                                                                    <span className="font-bold text-sm leading-tight text-white">{item}</span>
-                                                                    <button 
-                                                                        type="button"
-                                                                        onClick={() => removeCustomItem(item)}
-                                                                        className="text-red-400 hover:text-red-600 font-bold text-xs cursor-pointer tracking-wider uppercase ml-2 bg-transparent border-0"
-                                                                    >
-                                                                        Remove
-                                                                    </button>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-xs text-gray-400 font-medium italic">No custom items requested yet.</p>
-                                                    )}
-                                                    
-                                                    <div className="pt-2 border-t border-gray-100 flex gap-2">
-                                                        <input
-                                                            type="text"
-                                                            placeholder="Type custom item name (e.g., Organic Guava Juice)..."
-                                                            className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-black transition"
-                                                            id="custom-item-input"
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') {
-                                                                    e.preventDefault();
-                                                                    handleAddCustomItem();
-                                                                }
-                                                            }}
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleAddCustomItem}
-                                                            className="bg-black text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-800 transition active:scale-95 shadow-sm uppercase tracking-wider"
-                                                        >
-                                                            + Add
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })()}
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-400 font-medium italic">No custom items requested yet.</p>
+                                    )}
+                                    
+                                    <div className="pt-2 border-t border-gray-100 flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Type custom item name (e.g., Organic Guava Juice)..."
+                                            className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 outline-none focus:border-black transition"
+                                            id="custom-item-input"
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleAddCustomItem();
+                                                }
+                                            }}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleAddCustomItem}
+                                            className="bg-black text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-800 transition active:scale-95 shadow-xs uppercase tracking-wider"
+                                        >
+                                            + Add
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )
+
+                    const renderSelectedColumn = () => (
+                        <div className="bg-white border border-gray-200 rounded-2xl p-4 md:p-5 shadow-sm space-y-4 lg:sticky lg:top-0">
+                            {/* Header */}
+                            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                                <div className="flex items-center gap-2">
+                                    <h3 className="text-sm font-black text-gray-900 uppercase tracking-wide">
+                                        Selected Menu
+                                    </h3>
+                                    <span className="bg-black text-white text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                                        {currentItems.length}
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={clearActiveSessionItems}
+                                    className="text-xs font-bold text-red-500 hover:text-red-700 hover:underline cursor-pointer"
+                                >
+                                    Clear All
+                                </button>
+                            </div>
+
+                            {/* Active Preset or Custom Badge */}
+                            {activePreset ? (
+                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2 text-xs font-black text-amber-950 truncate">
+                                        <span>🍽️</span>
+                                        <span className="truncate">{activePreset.name}</span>
+                                    </div>
+                                    <span className="text-[9px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md shrink-0">
+                                        Preset Active
+                                    </span>
+                                </div>
+                            ) : (
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-2 font-bold text-slate-800">
+                                        <span>✨</span>
+                                        <span>Custom Selections</span>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-slate-500">
+                                        {currentItems.length} items picked
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Grouped Selected Items List */}
+                            <div className="space-y-3 max-h-[calc(90vh-300px)] overflow-y-auto pr-1">
+                                {stationsWithSelection.map(({ station, items }) => {
+                                    const match = station.selection_type?.match(/\d+/)
+                                    const limit = match ? parseInt(match[0]) : null
+                                    const isMax = limit !== null && items.length === limit
+                                    const isOver = limit !== null && items.length > limit
+
+                                    return (
+                                        <div key={station.id} className="bg-gray-50/70 border border-gray-200/80 rounded-xl p-3 space-y-2">
+                                            <div className="flex items-center justify-between pb-1.5 border-b border-gray-200/60">
+                                                <span className="text-xs font-black text-gray-900 uppercase tracking-tight truncate">
+                                                    {station.name}
+                                                </span>
+                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                                                    isOver
+                                                        ? 'bg-red-100 text-red-700'
+                                                        : isMax
+                                                        ? 'bg-emerald-100 text-emerald-800'
+                                                        : 'bg-white text-gray-600 border border-gray-200'
+                                                }`}>
+                                                    {items.length}{limit ? ` / ${limit}` : ''}
+                                                </span>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                {items.map((it: any) => (
+                                                    <div
+                                                        key={it.id || it.name}
+                                                        className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white border border-gray-200/70 hover:border-gray-300 transition group shadow-2xs"
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-black shrink-0" />
+                                                            <span className="text-xs font-bold text-gray-800 truncate">
+                                                                {it.name}
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleMenuItem(it.name, station)}
+                                                            className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition shrink-0 cursor-pointer font-bold text-xs"
+                                                            title={`Remove ${it.name}`}
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+
+                                {categoryCustomItems.length > 0 && (
+                                    <div className="bg-purple-50/50 border border-purple-200 rounded-xl p-3 space-y-2">
+                                        <div className="flex items-center justify-between pb-1.5 border-b border-purple-200/60">
+                                            <span className="text-xs font-black text-purple-950 uppercase tracking-tight">
+                                                Custom Requests
+                                            </span>
+                                            <span className="text-[10px] font-black px-2 py-0.5 rounded bg-purple-200/70 text-purple-900">
+                                                {categoryCustomItems.length}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            {categoryCustomItems.map(name => (
+                                                <div
+                                                    key={name}
+                                                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white border border-purple-100 hover:border-purple-300 transition group shadow-2xs"
+                                                >
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-purple-600 shrink-0" />
+                                                        <span className="text-xs font-bold text-gray-800 truncate">
+                                                            {name}
+                                                        </span>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeCustomItem(name)}
+                                                        className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition shrink-0 cursor-pointer font-bold text-xs"
+                                                        title={`Remove ${name}`}
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer inside column */}
+                            <div className="pt-3 border-t border-gray-100 space-y-2">
+                                <p className="text-[10px] text-gray-400 font-medium leading-tight">
+                                    💡 Click any dish on the left to add, remove, or swap items.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => setStep(2)}
+                                    className="w-full bg-black text-white py-2.5 rounded-xl text-xs font-bold hover:bg-gray-800 transition active:scale-95 shadow-md uppercase tracking-wider cursor-pointer"
+                                >
+                                    Confirm Selection ({currentItems.length} Items)
+                                </button>
+                            </div>
+                        </div>
+                    )
+
+                    return (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] overflow-y-auto animate-in fade-in duration-300">
+                            <div className="min-h-screen flex items-end md:items-center justify-center md:p-4">
+                                <div className={`bg-white w-full ${
+                                    hasSelectedItems ? 'md:max-w-5xl lg:max-w-6xl xl:max-w-7xl' : 'md:max-w-4xl'
+                                } rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-300 relative h-[92vh] max-h-[96vh] flex flex-col transition-all`}>
+
+                                    {/* MODAL HEADER */}
+                                    <div className="sticky top-0 bg-white/95 backdrop-blur border-b border-gray-100 p-4 md:p-6 flex justify-between items-center z-10 shrink-0">
+                                        <div>
+                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">
+                                                Day {activeSession.dayIndex + 1} • {eventDays[activeSession.dayIndex]}
+                                            </span>
+                                            <div className="flex items-center gap-3">
+                                                <h1 className="text-xl md:text-2xl font-black text-gray-900 uppercase tracking-tight truncate max-w-[200px] md:max-w-md">
+                                                    {activeCat?.title}
+                                                </h1>
+                                                {hasSelectedItems && (
+                                                    <a
+                                                        href="#selected-tray"
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-950 border border-amber-300 text-xs font-black uppercase tracking-wider"
+                                                    >
+                                                        <span className="text-amber-600">✓</span> {currentItems.length} Selected <span className="lg:hidden text-[10px] ml-1">↓</span>
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {hasSelectedItems && (
+                                                <button
+                                                    type="button"
+                                                    onClick={clearActiveSessionItems}
+                                                    className="hidden sm:inline-flex bg-white hover:bg-red-50 text-red-600 border border-red-200 px-3.5 py-2 rounded-full text-xs font-bold transition shadow-2xs"
+                                                    title="Clear all selected items"
+                                                >
+                                                    Clear All
+                                                </button>
+                                            )}
+                                            <button 
+                                                onClick={() => setStep(2)} 
+                                                className="bg-black text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-gray-800 transition-colors shadow-lg active:scale-95 cursor-pointer"
+                                            >
+                                                Done
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* MODAL BODY */}
+                                    <div className="p-4 md:p-6 lg:p-8 overflow-y-auto flex-1 bg-gray-50 relative">
+                                        {hasSelectedItems ? (
+                                            /* 2-COLUMN LAYOUT: Left = Stations & Presets, Right = Selected Items Column */
+                                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-12">
+                                                <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+                                                    {renderPresetBar()}
+                                                    {renderStationsList()}
+                                                </div>
+                                                <div id="selected-tray" className="lg:col-span-5 xl:col-span-4 scroll-mt-20">
+                                                    {renderSelectedColumn()}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            /* SINGLE COLUMN LAYOUT when no items selected yet */
+                                            <div className="space-y-8 md:space-y-10 pb-20">
+                                                {renderPresetBar()}
+                                                {renderStationsList()}
+                                            </div>
+                                        )}
+
+                                        {/* FLOATING TRAY BAR FOR MOBILE / TABLET */}
+                                        {hasSelectedItems && (
+                                            <div className="lg:hidden sticky bottom-3 z-30 mx-auto w-full pt-2">
+                                                <a
+                                                    href="#selected-tray"
+                                                    className="w-full bg-slate-900/95 backdrop-blur text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center justify-between border border-slate-700"
+                                                >
+                                                    <div className="flex items-center gap-2 text-xs font-bold">
+                                                        <span className="bg-amber-400 text-amber-950 px-2 py-0.5 rounded-full text-[10px] font-black">{currentItems.length}</span>
+                                                        <span>Items In Selection Tray</span>
+                                                    </div>
+                                                    <span className="text-xs font-black text-amber-300 flex items-center gap-1">
+                                                        View Tray ↓
+                                                    </span>
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                })()}
 
                 {/* STEP 4: FINAL PREVIEW */}
                 {step === 4 && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                        {!isPreview && !event?.menu_locked && !isLockedByDate && (
-                            <button onClick={() => setStep(2)} className="mb-8 text-xs font-bold text-gray-500 hover:text-black flex items-center gap-2 transition uppercase tracking-widest">
+                        {!isPreview && !isEventConcluded && !event?.menu_locked && (
+                            <button onClick={() => setStep(2)} className="mb-8 text-xs font-bold text-gray-500 hover:text-black flex items-center gap-2 transition uppercase tracking-widest cursor-pointer">
                                 ← Edit Selections
                             </button>
                         )}
@@ -1320,13 +1583,13 @@ function ClientMenuContent() {
                             </div>
                         </div>
 
-                        {!isPreview && !event?.menu_locked && !isLockedByDate && (
+                        {!isPreview && !isEventConcluded && !event?.menu_locked && (
                             <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200 p-4 z-40">
                                 <div className="max-w-5xl mx-auto flex justify-end items-center">
                                     <button
                                         onClick={handleSubmit}
                                         disabled={submitting}
-                                        className="bg-green-600 text-white px-10 py-3 rounded-xl text-sm font-bold hover:bg-green-700 transition shadow-xl shadow-green-900/10 active:scale-95 disabled:opacity-50 uppercase tracking-wide"
+                                        className="bg-green-600 text-white px-10 py-3 rounded-xl text-sm font-bold hover:bg-green-700 transition shadow-xl shadow-green-900/10 active:scale-95 disabled:opacity-50 uppercase tracking-wide cursor-pointer"
                                     >
                                         {submitting ? 'Processing...' : 'Confirm Final Menu'}
                                     </button>
@@ -1334,7 +1597,15 @@ function ClientMenuContent() {
                             </div>
                         )}
 
-                        {event?.menu_locked && !isPreview && (
+                        {isEventConcluded && !isPreview && (
+                            <div className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-700 p-4 z-40 text-center">
+                                <span className="text-xs font-black text-slate-200 uppercase tracking-wider flex items-center justify-center gap-2">
+                                    <span>🔒</span> Event Closed — This event has concluded and menu is archived
+                                </span>
+                            </div>
+                        )}
+
+                        {!isEventConcluded && event?.menu_locked && !isPreview && (
                             <div className="fixed bottom-0 left-0 right-0 bg-amber-950/95 backdrop-blur-md border-t border-amber-600/40 p-4 z-40 text-center">
                                 <span className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center justify-center gap-2">
                                     <span>🔒</span> Menu Locked by Administrator — No changes can be submitted
@@ -1346,77 +1617,7 @@ function ClientMenuContent() {
 
             </div>
 
-            {/* SAVE CURRENT AS PRESET MODAL */}
-            {isSavePresetModalOpen && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
-                        <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-                            <div className="flex items-center gap-2">
-                                <span className="text-xl">⭐</span>
-                                <h3 className="text-lg font-black text-gray-900">Save Preset Menu</h3>
-                            </div>
-                            <button
-                                onClick={() => setIsSavePresetModalOpen(false)}
-                                className="text-gray-400 hover:text-black font-bold text-lg"
-                            >
-                                ✕
-                            </button>
-                        </div>
 
-                        <p className="text-xs text-gray-500 font-medium leading-relaxed">
-                            Save the currently selected items as a reusable preset template for future frequent menu selections.
-                        </p>
-
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 mb-1">Preset Name *</label>
-                                <input
-                                    type="text"
-                                    placeholder="e.g., South Indian Meals, Deluxe Wedding Lunch..."
-                                    value={newPresetName}
-                                    onChange={e => setNewPresetName(e.target.value)}
-                                    className="w-full border border-gray-200 rounded-xl p-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-amber-500"
-                                    autoFocus
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                            e.preventDefault()
-                                            handleSaveCurrentAsPreset()
-                                        }
-                                    }}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-[11px] font-black uppercase tracking-wider text-gray-500 mb-1">Description (Optional)</label>
-                                <input
-                                    type="text"
-                                    placeholder="e.g., Signature 10-item lunch combo for special events"
-                                    value={newPresetDesc}
-                                    onChange={e => setNewPresetDesc(e.target.value)}
-                                    className="w-full border border-gray-200 rounded-xl p-3 text-sm font-medium text-gray-700 outline-none focus:ring-2 focus:ring-amber-500"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2 pt-2">
-                            <button
-                                type="button"
-                                onClick={() => setIsSavePresetModalOpen(false)}
-                                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-xs hover:bg-gray-200 transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleSaveCurrentAsPreset}
-                                className="flex-1 bg-amber-900 text-white py-3 rounded-xl font-bold text-xs hover:bg-black transition shadow-lg shadow-amber-900/20"
-                            >
-                                Save Preset
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* FLOATING PRESET TOAST NOTIFICATION */}
             {presetToast && (
@@ -1476,12 +1677,12 @@ function Header({ event }: { event: any }) {
 
 function StepFooter({ onNext, nextLabel, disabled }: any) {
     return (
-        <div className="fixed bottom-0 left-0 right-0 p-6 bg-white border-t border-gray-200 z-40 bg-opacity-95 backdrop-blur shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+        <div className="fixed bottom-0 left-0 right-0 p-4 sm:p-6 bg-white border-t border-gray-200 z-40 bg-opacity-95 backdrop-blur shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
             <div className="max-w-5xl mx-auto flex justify-end items-center">
                 <button
                     onClick={onNext}
                     disabled={disabled}
-                    className="bg-black text-white px-8 py-3 rounded-xl text-sm font-bold hover:bg-gray-800 transition active:scale-95 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed tracking-wide uppercase"
+                    className="w-full sm:w-auto text-center bg-black text-white px-8 py-3 rounded-xl text-sm font-bold hover:bg-gray-800 transition active:scale-95 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed tracking-wide uppercase cursor-pointer"
                 >
                     {nextLabel}
                 </button>
@@ -1490,42 +1691,54 @@ function StepFooter({ onNext, nextLabel, disabled }: any) {
     )
 }
 
-function SuccessScreen({ onEdit, eventId, isLockedByDate, isMenuLockedByAdmin }: { onEdit: () => void, eventId: string, isLockedByDate: boolean, isMenuLockedByAdmin: boolean }) {
+function SuccessScreen({ onEdit, eventId, isLockedByDate, isMenuLockedByAdmin, isEventConcluded }: { onEdit: () => void, eventId: string, isLockedByDate: boolean, isMenuLockedByAdmin: boolean, isEventConcluded?: boolean }) {
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-6 sm:p-10 text-center font-sans">
-            <div className="text-6xl mb-6">🎉</div>
-            <h1 className="text-3xl sm:text-4xl font-black mb-3">Menu Confirmed!</h1>
-            <p className="text-gray-400 text-sm sm:text-base max-w-md mb-8">Your selections have been sent to our team. We will review and provide the final quotation shortly.</p>
+            <div className="text-6xl mb-6">{isEventConcluded ? '🔒' : '🎉'}</div>
+            <h1 className="text-3xl sm:text-4xl font-black mb-3">{isEventConcluded ? 'Event Closed' : 'Menu Confirmed!'}</h1>
+            <p className="text-gray-400 text-sm sm:text-base max-w-md mb-8">
+                {isEventConcluded 
+                    ? 'This event has concluded. The menu is permanently archived and cannot be edited.' 
+                    : 'Your selections have been sent to our team. We will review and provide the final quotation shortly.'}
+            </p>
 
-            {isMenuLockedByAdmin && (
+            {isEventConcluded ? (
+                <div className="bg-slate-900 border border-slate-700 text-slate-300 p-4 rounded-2xl flex items-center justify-center gap-3 mb-6 max-w-md w-full">
+                    <span className="text-xl">🔒</span>
+                    <div className="text-left">
+                        <p className="text-xs font-black uppercase tracking-wider">Event Closed</p>
+                        <p className="text-[11px] text-slate-400 font-medium mt-0.5">Editing is permanently closed for completed events.</p>
+                    </div>
+                </div>
+            ) : isMenuLockedByAdmin ? (
                 <div className="bg-amber-950/60 border border-amber-500/40 text-amber-300 p-4 rounded-2xl flex items-center justify-center gap-3 mb-6 max-w-md w-full">
                     <span className="text-xl">🔒</span>
                     <div className="text-left">
                         <p className="text-xs font-black uppercase tracking-wider">Menu Locked by Administrator</p>
-                        <p className="text-[11px] text-amber-200/80 font-medium mt-0.5">The administration has finalized and locked this menu. Editing is closed.</p>
+                        <p className="text-[11px] text-amber-200/80 font-medium mt-0.5">The administration has locked this menu. Editing is disabled.</p>
                     </div>
                 </div>
-            )}
+            ) : null}
 
             <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
-                {isMenuLockedByAdmin ? (
+                {isEventConcluded ? (
+                    <button
+                        disabled
+                        className="bg-gray-800 text-gray-500 border border-gray-700 px-8 py-3 rounded-full text-xs font-bold shadow-lg cursor-not-allowed uppercase tracking-widest whitespace-nowrap"
+                    >
+                        🔒 Event Closed
+                    </button>
+                ) : isMenuLockedByAdmin ? (
                     <button
                         disabled
                         className="bg-gray-800 text-gray-500 border border-gray-700 px-8 py-3 rounded-full text-xs font-bold shadow-lg cursor-not-allowed uppercase tracking-widest whitespace-nowrap"
                     >
                         🔒 Menu Locked by Admin
                     </button>
-                ) : isLockedByDate ? (
-                    <button
-                        disabled
-                        className="bg-gray-800 text-gray-500 border border-gray-700 px-8 py-3 rounded-full text-xs font-bold shadow-lg cursor-not-allowed uppercase tracking-widest whitespace-nowrap"
-                    >
-                        🔒 Editing Locked
-                    </button>
                 ) : (
                     <button
                         onClick={onEdit}
-                        className="bg-white text-black px-8 py-3 rounded-full text-xs font-bold shadow-lg hover:bg-gray-200 transition-colors uppercase tracking-widest whitespace-nowrap"
+                        className="bg-white text-black px-8 py-3 rounded-full text-xs font-bold shadow-lg hover:bg-gray-200 transition-colors uppercase tracking-widest whitespace-nowrap cursor-pointer"
                     >
                         Edit Menu
                     </button>
@@ -1533,7 +1746,7 @@ function SuccessScreen({ onEdit, eventId, isLockedByDate, isMenuLockedByAdmin }:
                 <a
                     href={`/client-menu/${eventId}?preview=true&print=true`}
                     target="_blank"
-                    className="bg-gray-800 border border-gray-700 text-white px-8 py-3 rounded-full text-xs font-bold shadow-lg hover:bg-gray-700 transition-colors uppercase tracking-widest whitespace-nowrap"
+                    className="bg-gray-800 border border-gray-700 text-white px-8 py-3 rounded-full text-xs font-bold shadow-lg hover:bg-gray-700 transition-colors uppercase tracking-widest whitespace-nowrap cursor-pointer"
                 >
                     Download Menu Document
                 </a>
